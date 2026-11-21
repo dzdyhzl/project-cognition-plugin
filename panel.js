@@ -138,17 +138,20 @@ export class ProjectCognitionPanelService extends PanelServiceBase {
 
     const metaText = await readTextOrNull(paths.meta)
     const state = await stateModule.loadState(paths.state)
-    const codeSummary = summarizeVolume(await readTextOrNull(paths.code))
+    const codeRaw = await readTextOrNull(paths.code)
+    const codeSummary = summarizeVolume(codeRaw)
     const databaseSummary = summarizeVolume(await readTextOrNull(paths.database))
     const header = fmt.parseRootManifest(rootText)
 
-    // Code drift: one walk, then compare against state.files.
+    // Code drift and coverage: one walk, then compare against state.files.
     let drift = null
+    let coverage = null
     if (state !== null) {
       try {
         const walked = await scanner.scanInventory(root, {})
         await scanner.hashFiles(root, walked.files)
         drift = scanner.compareDrift(walked.files, state)
+        coverage = scanner.coverageStats(walked.files, state)
       } catch (error) {
         drift = { error: error.message, missing: [], orphan: [], stale: [], unchanged: [] }
       }
@@ -252,6 +255,16 @@ export class ProjectCognitionPanelService extends PanelServiceBase {
         drift: databaseDrift,
       },
       verify: { ...verify, violations: verify.violations.slice(0, MAX_LIST), violationsTotal: verify.violations.length },
+      coverage: coverage === null ? null : {
+        indexedFiles: coverage.indexedFiles,
+        totalFiles: coverage.totalFiles,
+        indexedLines: coverage.indexedLines,
+        totalLines: coverage.totalLines,
+        filesPct: Math.round(coverage.coverageFiles * 100),
+        linesPct: Math.round(coverage.coverageLines * 100),
+        missingEntries: coverage.missingEntries,
+      },
+      indexTokens: fmt.estimateTokens(rootText) + (metaText ? fmt.estimateTokens(metaText) : 0) + (codeRaw ? fmt.estimateTokens(codeRaw) : 0),
       updatedAt: new Date().toISOString(),
     }
   }

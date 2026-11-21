@@ -1,7 +1,7 @@
 # @local/project-cognition — 项目认知索引
 
 [![DSH Plugin](https://img.shields.io/badge/platform-DeepSeek%20Harness-blue)](https://github.com/dzdyhzl/project-cognition-plugin)
-[![Version](https://img.shields.io/badge/version-1.6.0-green)](./package.json)
+[![Version](https://img.shields.io/badge/version-1.7.0-green)](./package.json)
 
 在每个项目的 `.cognition/` 目录维护一套**随 Git 版本化的纯文本认知索引**，让 AI 会话读一次索引即可获得项目全局认知，而不是每个任务都重新搜索、重读整个代码库。代码变化后可检测漂移并增量维护，索引始终与代码对齐。
 

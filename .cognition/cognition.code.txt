@@ -3,14 +3,14 @@
 ===./===
 PLAN.md[SS7S]: F:设计决策记录：目标、已确认决策（简化复刻范围、触发方式、索引存放）、工具表、实施步骤与验收标准。 | R:- | A:PLAN.md（初始设计文档） | S:记录的是 v1 设计时点：未含后来加入的 Web 面板、cognition_registry 与数据库认知；与现状冲突时以 docs/DETAIL.md 和源码为准。
 README.md[SG6]: F:项目自述：原理、12 个工具表、快速开始、面板与边界 | R:- | A:- | S:版本徽章与 package.json 同步维护
-client.js[EU8M]: F:面板客户端 + 会话门禁覆盖层：注册懒加载 factory 挂载只读面板页；订阅 sessions 列表，在当前会话首次活动后调用 sessionGate，未登记项目经 shell.overlay 插槽渲染 GateOverlay 毛玻璃卡片（创建→白名单 / 拒绝→黑名单），移植自 github-workbench。 | R:code:panel.js,code:locale/zh.json,code:locale/en.json | A:window.__ModuleLoader__.load({ id: '@local/project-cognition', factory })；Remote 方法 panelData/sessionGate/gateDecision | S:GateOverlay 锚定 [data-slot='conversation.session']（只盖会话区不盖输入框），ResizeObserver 跟随缩放；每个浏览器会话内每路径最多弹一次（gateDismissed 集合），切换会话静默撤下；面板页严格只读，写入只走 gateDecision。
+client.js[EU7]: F:面板 Web 界面：工作区选择、统计卡、漂移/覆盖率徽章、待维护清单、数据库卷、验证结论、条目预览，以及未登记项目的建索引询问对话框 | R:code:panel.js | A:默认导出 client factory（id=@local/project-cognition） | S:经 ModuleLoader 懒加载；文案走 ctx.locale.bind，zh/en 双语必须同步
 cordis.patch.yml[FG9T]: F:用户补丁层声明：把 project-cognition 插件与其面板服务插入当前运行配置，升级不丢。 | R:code:package.json | A:insert 两个 cordis 条目：project-cognition 与 project-cognition:panel | S:由 dsh bundle 机制加载（package.json 的 dsh.bundle.patch 指向此文件）；面板条目 id 带 :panel 后缀，指向 package.json exports 的 ./panel。
-index.js[AB9L]: F:注册全部 cognition_* 工具与系统提示段：overview（token 估算、覆盖率、token 预算分块）、init、scan（覆盖率）、update_entries、remove_entries、search、database_init、database_scan、verify、doctor、gate、registry | R:code:lib/format.js,code:lib/scanner.js,code:lib/state.js,code:lib/templates.js,code:lib/ddl.js,code:lib/registry.js | A:apply(ctx, config) 注册 12 个工具 | S:lib 模块经 file:// 绝对路径动态导入规避 profile 链接误解析；工具参数经 coerceValue 兼容字符串化 JSON
+index.js[AB9L]: F:注册全部 cognition_* 工具与系统提示段：overview（token 估算、覆盖率、token 预算分块）、init、scan（覆盖率）、update/remove_entries、search（forward/reverse/impact 传递闭包）、database_init/scan、verify、doctor、gate、registry | R:code:lib/format.js,code:lib/scanner.js,code:lib/state.js,code:lib/templates.js,code:lib/ddl.js,code:lib/registry.js | A:apply(ctx, config) 注册 12 个工具 | S:impact 投影沿正式 R 边反向 BFS，深度限 10 层防环；lib 模块经 file:// 绝对路径动态导入规避 profile 链接误解析
 package.json[FG5]: F:bundle 清单：包名 @local/project-cognition、版本、导出映射、DSH client/patch 声明 | R:code:cordis.patch.yml | A:- | S:exports 同时暴露 index/panel/client/locale/icon 五个入口；dsh.client.inject 依赖会话界面插件
-panel.js[IU8M]: F:面板 Host 端 + 门禁事实服务：Typert Remote 服务 projectCognitionPanel 提供 panelData 只读快照、sessionGate（名单覆盖与索引存在性）与 gateDecision（记录用户白/黑名单选择）。 | R:code:lib/registry.js,code:lib/state.js | A:ProjectCognitionPanelService（Remote 方法：panelData、sessionGate、gateDecision） | S:内嵌精简 Typert Remote 绑定形状（Host 不依赖 dsh-typert-protocol）；RemoteError 由 isDSHRemoteError 标记加 code 判别，绝不用 instanceof；gateDecision 是覆盖层唯一的写入通道。
+panel.js[CG7]: F:只读面板 Host 服务：panelData 快照（卷摘要、漂移、覆盖率、token 规模、数据库 evidence、verify）、sessionGate 名单事实、gateDecision 写名单 | R:code:lib/format.js,code:lib/scanner.js,code:lib/state.js,code:lib/registry.js | A:panelData, sessionGate, gateDecision | S:经 Typert Remote 描述符直连调用，失败按 isDSHRemoteError 结构判别；面板严格只读
 
 ===docs/===
-DETAIL.md[SG6]: F:中文详细文档：功能清单、索引文件布局、使用建议与边界 | R:code:index.js | A:- | S:与 README 保持同步；新增覆盖率/token 分块/doctor 说明
+DETAIL.md[SG6]: F:中文详细文档：功能清单、索引文件布局、使用建议与边界 | R:code:index.js | A:- | S:与 README 保持同步；含影响分析、覆盖率、token 分块、doctor 说明
 
 ===lib/===
 ddl.js[KZ7M]: F:DDL 解析器：把 mysqldump/pg_dump/手写 .sql 文本解析为结构化 Schema Evidence（表、列、PK/FK/唯一键/索引），并显式报告无法解析的内容。 | R:- | A:parseDdl(text, { sourceId, engine }) | S:只覆盖常见方言表面（反引号/双引号标识符、MySQL COMMENT/ENGINE、PostgreSQL 类型、常见约束）；解析失败进入 parseWarnings 而非静默丢弃。
@@ -21,5 +21,5 @@ state.js[PD8S]: F:state.json 机器状态：受管文件哈希、条目哈希、
 templates.js[CS7S]: F:分卷模板：cognition_init 使用的 Root/Meta/Code（及 Database）骨架文本、两套语言的标签字典与 .cognition/.gitignore 内容，只含规则不含业务语义。 | R:- | A:volumeTemplates、rootWithDatabaseVolume、COGNITION_GITIGNORE | S:标签字典随 locale（zh-CN/en-US）切换措辞但代码一致；模板绝不伪造业务语义，语义一律由模型读源码后撰写。
 
 ===locale/===
-en.json[SG4]: F:英文界面文案：插件元信息、各工具摘要、面板标签 | R:- | A:- | S:工具 summary 由 DSH 读取展示，改名字段需同步 zh.json
-zh.json[SG4]: F:中文界面文案：插件元信息、各工具摘要、面板标签 | R:- | A:- | S:工具 summary 由 DSH 读取展示，改名字段需同步 en.json
+en.json[SG4]: F:英文界面文案：插件元信息、各工具摘要、面板标签 | R:- | A:- | S:工具 summary 由 DSH 读取展示，改字段需同步 zh.json
+zh.json[SG4]: F:中文界面文案：插件元信息、各工具摘要、面板标签 | R:- | A:- | S:工具 summary 由 DSH 读取展示，改字段需同步 en.json

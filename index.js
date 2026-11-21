@@ -769,7 +769,7 @@ export function apply(ctx, userConfig = {}) {
         tags: { type: 'string', description: 'Comma-separated tag codes that must all appear in the entry tags (e.g. "P,9").' },
         path: { type: 'string', description: 'Substring the entry path/table must contain. For relations, the exact or suffix identity (e.g. "lib/greet.js" or "public.orders").' },
         keyword: { type: 'string', description: 'Free keyword matched case-insensitively in F/R/A/S text.' },
-        relations: { type: 'string', enum: ['forward', 'reverse'], description: 'Relation projection mode. forward: for the exact path, list its R references. reverse: list every entry whose R references the path. Requires `path`.' },
+        relations: { type: 'string', enum: ['forward', 'reverse', 'impact'], description: 'Relation projection mode. forward: for the exact path, list its R references. reverse: list every entry whose R references the path. impact: transitive reverse closure — every entry that may be reached from the target along formal R relationships, level by level (AOCI-style impact analysis; traverses only model-authored R edges). Requires `path`.' },
       },
     },
     output: {
@@ -790,7 +790,7 @@ export function apply(ctx, userConfig = {}) {
           : `No Code volume at ${paths.code}. Call cognition_init first.` }
       }
       const parsed = fmt.parseCodeVolume(codeText)
-      const relMode = args.relations === 'forward' || args.relations === 'reverse' ? args.relations : undefined
+      const relMode = ['forward', 'reverse', 'impact'].includes(args.relations) ? args.relations : undefined
       if (relMode !== undefined) {
         const target = String(args.path ?? '').replaceAll('\\', '/').replace(/^(code|database):/, '').trim()
         if (target.length === 0) {
@@ -818,6 +818,69 @@ export function apply(ctx, userConfig = {}) {
           }
           return { text: lines.join('\n') }
         }
+      if (relMode === 'impact') {
+        // Transitive reverse closure along formal R edges only (AOCI's impact
+        // analysis, simplified): who depends on the target, directly or through
+        // other indexed entries. Unresolvable references are counted, never guessed.
+        const resolveRef = (ref) => {
+          const refPath = ref.replace(/^(code|database):/, '')
+          let found = byPath.get(refPath)
+          if (found === undefined) {
+            for (const [fullPath, entry] of byPath) {
+              if (fullPath.endsWith(`/${refPath}`)) { found = entry; return [fullPath, entry] }
+            }
+          }
+          return found === undefined ? null : [refPath, found]
+        }
+        // Seed with every entry directly referencing the target.
+        const adjacency = new Map() // entryPath -> [{ refPath, ref }]
+        for (const [fullPath, entry] of byPath) {
+          if (entry.r === '-') continue
+          const edges = []
+          for (const ref of entry.r.split(',').map(item => item.trim()).filter(Boolean)) {
+            const refPath = ref.replace(/^(code|database):/, '')
+            if (refPath === target || refPath.endsWith(`/${target}`) || target.endsWith(`/${refPath}`)) edges.push({ refPath, ref })
+          }
+          adjacency.set(fullPath, edges)
+        }
+        // Reverse BFS from the target: level 0 = direct dependents.
+        const levels = []
+        const visited = new Set()
+        let frontier = [...adjacency.entries()].filter(([, edges]) => edges.length > 0).map(([fullPath]) => fullPath)
+        frontier = [...new Set(frontier)]
+        let unresolvedRefs = 0
+        while (frontier.length > 0 && levels.length < 10) {
+          levels.push(frontier)
+          for (const path of frontier) visited.add(path)
+          const next = new Set()
+          for (const [fullPath, entry] of byPath) {
+            if (visited.has(fullPath)) continue
+            if (entry.r === '-') continue
+            for (const ref of entry.r.split(',').map(item => item.trim()).filter(Boolean)) {
+              const resolved = resolveRef(ref)
+              if (resolved === null) { unresolvedRefs++; continue }
+              if (frontier.includes(resolved[0]) || visited.has(resolved[0])) {
+                next.add(fullPath)
+                break
+              }
+            }
+          }
+          frontier = [...next].filter(path => !visited.has(path))
+        }
+        const total = levels.reduce((sum, level) => sum + level.length, 0)
+        const lines = [`# Impact of ${target} (${isDatabase ? 'database' : 'code'} volume)`, `derived=true — computed from model-authored R relations only; ${total} entr${total === 1 ? 'y' : 'ies'} may be reached transitively.`]
+        if (total === 0) lines.push('No indexed entry references it along formal R edges.')
+        levels.forEach((level, index) => {
+          lines.push(`## Level ${index} (${level.length} — ${index === 0 ? 'direct dependents' : 'dependents at depth ' + (index + 1)})`)
+          for (const fullPath of level) {
+            const entry = byPath.get(fullPath)
+            lines.push(`- ${fullPath}[${entry?.tags ?? '?'}]: F:${entry?.f ?? ''}`)
+          }
+        })
+        if (unresolvedRefs > 0) lines.push(`${unresolvedRefs} R reference(s) did not resolve to an indexed entry and were not traversed.`)
+        if (levels.length >= 10) lines.push('Depth capped at 10 levels; deeper chains were not traversed.')
+        return { text: lines.join('\n') }
+      }
         // reverse: every entry whose R references the target.
         const reverse = []
         for (const [fullPath, entry] of byPath) {
