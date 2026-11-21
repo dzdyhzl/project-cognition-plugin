@@ -10,6 +10,7 @@
 - **增量维护**：开发完成后调用 `cognition_scan` 检测漂移（Missing 已删文件 / Orphan 新文件 / Stale 内容已变），用 `cognition_update_entries` / `cognition_remove_entries` 补齐，索引回到与代码对齐的状态。
 - **影响分析**：`cognition_search` 传 `relations=impact` + `path=目标文件`，沿模型撰写的正式 R 关系反向遍历传递闭包，逐层输出"改这个文件可能波及哪些条目"（derived=true，只走显式 R 边，不自动推断）。
 - **覆盖率与规模**：overview 与 scan 报告索引覆盖了多少受管代码（文件数/行数百分比），并估算索引的 token 规模；大索引的 overview 分块按估算 token 预算（默认 7000，配置 `overviewChunkTokens`）切分，而不是固定条数。
+- **快照与演化**：`cognition_snapshot` 输出一份确定性只读 JSON 观察（条目清单+条目哈希+覆盖率+token 规模），由调用方自行保存（如存到仓库外或 Git 历史里）；`cognition_evolution` 读入旧快照与当前状态对比——新增/删除/变更条目、覆盖率百分比变化、索引 token 变化、待维护差值。两者都不落盘到项目内，对应 AOCI-CODE 的 snapshot/evolution 派生观察。
 - **诊断**：`cognition_doctor` 一次性体检索引环境——分卷骨架、Meta 字典可解析、state.json 完整性（v1/v2、条目/文件哈希一致性、待办清单异常）、schema evidence 与声明一致性、漂移摘要、覆盖率、索引规模与分块预算；输出逐项 HEALTHY / WARN / FAIL 结论，索引行为异常或从 Git 恢复后可运行。
 - **只读 Web 面板**：左侧栏新增"项目认知索引"页：选一个已登记的工作区，即可查看代码/数据库条目数、漂移计数（missing/orphan/stale）、待写清单、数据库 evidence 状态与 verify 对齐结论，30 秒自动刷新可关。面板严格只读，所有写入仍通过会话中的 cognition_* 工具完成。
 - **白/黑名单门禁**：`cognition_gate` 在每次会话开始时把项目对照 `~/.dsh/project-cognition.json` 里的两份名单（白名单 allowed / 黑名单 declined，二者互斥）：黑名单项目不处理，也不建议建索引；白名单项目已有索引则动态维护（开发后 `cognition_scan` → `cognition_update_entries` / `cognition_remove_entries`），没有索引则立即创建；两表都未登记时，模型通过用户问答覆盖对话框询问一次"是否创建 cognition"，用户选创建→写入白名单并开始建索引，选拒绝→写入黑名单。`cognition_registry` 的 `list` 展示两份名单，`whitelist`/`unwhitelist`/`decline`/`allow` 分别维护白/黑名单。

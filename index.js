@@ -1134,6 +1134,146 @@ export function apply(ctx, userConfig = {}) {
     presentCall: (args) => ({ card: 'generic', title: 'Verify cognition index', kind: 'read' }),
   })
 
+  // --------------------------------------------------------------- snapshot
+  tool(ctx, {
+    name: 'cognition_snapshot',
+    description: 'Emit a deterministic read-only observation of the current cognition state (entry list with hashes, coverage, index tokens, drift pending counts). Save the returned JSON yourself and pass its path to cognition_evolution later to compare an earlier observation with now. Persists nothing; derived=true.',
+    parameters: {
+      type: 'object',
+      properties: {
+        project: { type: 'string', description: 'Project root directory. Defaults to the session working directory.' },
+      },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => renderText(value),
+    },
+    async execute(args, exec) {
+      const root = await resolveProjectRoot(ctx, exec.agent, args.project)
+      const paths = cognitionPaths(root)
+      const stateData = await loadState(paths.state)
+      if (stateData === null) return { text: `No cognition state under ${paths.dir}. Call cognition_init first.` }
+      const entryList = []
+      for (const [volumeName, volumeFile] of [['code', paths.code], ['database', paths.database]]) {
+        if (!(await fileExists(volumeFile))) continue
+        const parsed = fmt.parseCodeVolume(await readFile(volumeFile, 'utf8'))
+        for (const section of parsed.sections) {
+          for (const entry of section.entries) {
+            const fullPath = `${section.dir === '.' ? '' : `${section.dir}/`}${entry.basename}`
+            entryList.push({ object: volumeName === 'code' ? `code:${fullPath}` : `database:${fullPath}`, tags: entry.tags, hash: fmt.entryHash({ path: fullPath, tags: entry.tags, f: entry.f, r: entry.r, a: entry.a, s: entry.s }) })
+          }
+        }
+      }
+      entryList.sort((a, b) => (a.object < b.object ? -1 : 1))
+      // Deterministic coverage from the current tree.
+      let coverage = null
+      try {
+        const walked = await scanner.scanInventory(root, { maxFileBytes, excludeDirs: [...extraExcludeDirs], include: extraExtensions })
+        await scanner.hashFiles(root, walked.files)
+        const stats = scanner.coverageStats(walked.files, stateData)
+        coverage = { indexedFiles: stats.indexedFiles, totalFiles: stats.totalFiles, indexedLines: stats.indexedLines, totalLines: stats.totalLines, filesPct: Math.round(stats.coverageFiles * 100), linesPct: Math.round(stats.coverageLines * 100) }
+      } catch { /* best-effort */ }
+      let indexTokens = 0
+      for (const volumeFile of [paths.root, paths.meta, paths.code, paths.database]) {
+        if (await fileExists(volumeFile)) indexTokens += estimateTokens(await readFile(volumeFile, 'utf8'))
+      }
+      const snapshot = {
+        kind: 'project-cognition/snapshot',
+        derived: true,
+        project: basename(root),
+        root,
+        takenAt: new Date().toISOString(),
+        entries: entryList,
+        counts: { entries: entryList.length, pending: (stateData.pending ?? []).length, databasePending: (stateData.database?.pending ?? []).length },
+        coverage,
+        indexTokens,
+      }
+      return { text: [`# cognition_snapshot (derived=true; save this JSON for cognition_evolution)`, JSON.stringify(snapshot, null, 2)].join('\n') }
+    },
+    presentCall: (args) => ({ card: 'generic', title: `Snapshot cognition state${args?.project ? `: ${args.project}` : ''}`, kind: 'read' }),
+  })
+
+  // -------------------------------------------------------------- evolution
+  tool(ctx, {
+    name: 'cognition_evolution',
+    description: 'Compare a previously saved cognition_snapshot JSON file with the current state: entries added, removed, changed (hash differs), coverage change, index token change, and drift pending deltas. Read-only; derived=true; the caller supplies the old snapshot — nothing is stored.',
+    parameters: {
+      type: 'object',
+      properties: {
+        project: { type: 'string', description: 'Project root directory. Defaults to the session working directory.' },
+        snapshot_file: { type: 'string', description: 'Path to the saved snapshot JSON (absolute, or relative to the project root).' },
+      },
+      required: ['snapshot_file'],
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => renderText(value),
+    },
+    async execute(rawArgs, exec) {
+      const args = { ...rawArgs, snapshot_file: String(rawArgs.snapshot_file ?? '') }
+      const root = await resolveProjectRoot(ctx, exec.agent, args.project)
+      const paths = cognitionPaths(root)
+      const snapshotAbs = isAbsolute(args.snapshot_file) ? args.snapshot_file : resolve(root, args.snapshot_file)
+      let previous
+      try {
+        previous = JSON.parse(await readFile(snapshotAbs, 'utf8'))
+      } catch (error) {
+        return { text: `cognition_evolution: cannot read snapshot file ${snapshotAbs} (${error.message}). Save cognition_snapshot output as JSON first.` }
+      }
+      if (previous?.kind !== 'project-cognition/snapshot' || !Array.isArray(previous.entries)) {
+        return { text: `cognition_evolution: ${snapshotAbs} is not a cognition_snapshot JSON (missing kind=project-cognition/snapshot).` }
+      }
+      // Current observation, built the same deterministic way.
+      const current = { entries: [] }
+      for (const [volumeName, volumeFile] of [['code', paths.code], ['database', paths.database]]) {
+        if (!(await fileExists(volumeFile))) continue
+        const parsed = fmt.parseCodeVolume(await readFile(volumeFile, 'utf8'))
+        for (const section of parsed.sections) {
+          for (const entry of section.entries) {
+            const fullPath = `${section.dir === '.' ? '' : `${section.dir}/`}${entry.basename}`
+            current.entries.push({ object: volumeName === 'code' ? `code:${fullPath}` : `database:${fullPath}`, tags: entry.tags, hash: fmt.entryHash({ path: fullPath, tags: entry.tags, f: entry.f, r: entry.r, a: entry.a, s: entry.s }) })
+          }
+        }
+      }
+      current.entries.sort((a, b) => (a.object < b.object ? -1 : 1))
+      const previousMap = new Map(previous.entries.map(entry => [entry.object, entry]))
+      const currentMap = new Map(current.entries.map(entry => [entry.object, entry]))
+      const added = current.entries.filter(entry => !previousMap.has(entry.object))
+      const removed = previous.entries.filter(entry => !currentMap.has(entry.object))
+      const changed = current.entries.filter(entry => previousMap.has(entry.object) && previousMap.get(entry.object).hash !== entry.hash)
+      const stateData = await loadState(paths.state)
+      const nowPending = (stateData?.pending ?? []).length + (stateData?.database?.pending ?? []).length
+      const thenPending = (previous.counts?.pending ?? 0) + (previous.counts?.databasePending ?? 0)
+      let currentCoverage = null
+      try {
+        const walked = await scanner.scanInventory(root, { maxFileBytes, excludeDirs: [...extraExcludeDirs], include: extraExtensions })
+        await scanner.hashFiles(root, walked.files)
+        const stats = scanner.coverageStats(walked.files, stateData ?? {})
+        currentCoverage = { filesPct: Math.round(stats.coverageFiles * 100), linesPct: Math.round(stats.coverageLines * 100), totalLines: stats.totalLines }
+      } catch { /* best-effort */ }
+      const lines = [`# cognition_evolution — ${previous.project ?? '?'}`]
+      lines.push(`snapshot from ${previous.takenAt ?? '?'} → now (${new Date().toISOString().slice(0, 19)}Z), derived=true`)
+      lines.push(`entries: ${previous.entries.length} → ${current.entries.length} (added ${added.length}, removed ${removed.length}, changed ${changed.length})`)
+      if (added.length > 0) lines.push(`added: ${added.map(entry => entry.object).join(', ')}`)
+      if (removed.length > 0) lines.push(`removed: ${removed.map(entry => entry.object).join(', ')}`)
+      if (changed.length > 0) lines.push(`changed: ${changed.map(entry => entry.object).join(', ')}`)
+      if (previous.coverage !== null && currentCoverage !== null) {
+        lines.push(`coverage: files ${previous.coverage.filesPct ?? '?'}% → ${currentCoverage.filesPct}%, lines ${previous.coverage.linesPct ?? '?'}% → ${currentCoverage.linesPct}% (total lines ${previous.coverage.totalLines ?? '?'} → ${currentCoverage.totalLines})`)
+      }
+      if (previous.indexTokens !== undefined) {
+        let currentIndexTokens = 0
+        for (const volumeFile of [paths.root, paths.meta, paths.code, paths.database]) {
+          if (await fileExists(volumeFile)) currentIndexTokens += estimateTokens(await readFile(volumeFile, 'utf8'))
+        }
+        lines.push(`index tokens: ${previous.indexTokens} → ${currentIndexTokens}`)
+      }
+      lines.push(`pending maintenance items: ${thenPending} → ${nowPending}`)
+      if (added.length === 0 && removed.length === 0 && changed.length === 0) lines.push('The indexed object set is unchanged since the snapshot (entry contents may still differ inside F/R/A/S if hashes moved — see changed list above).')
+      return { text: lines.join('\n') }
+    },
+    presentCall: (args) => ({ card: 'generic', title: `Evolution vs snapshot${args?.snapshot_file ? `: ${args.snapshot_file}` : ''}`, kind: 'read' }),
+  })
+
   // ----------------------------------------------------------------- doctor
   tool(ctx, {
     name: 'cognition_doctor',
@@ -1288,15 +1428,20 @@ export function apply(ctx, userConfig = {}) {
       if (whitelisted !== null) {
         if (hasIndex) {
           const stateData = await loadState(paths.state)
-          const pending = (stateData?.pending?.length ?? 0) + (stateData?.databasePending?.length ?? 0)
-          return {
-            text: [
-              `VERDICT: whitelisted-indexed. ${root} has a cognition index; keep it dynamically maintained.`,
-              pending > 0
-                ? `Pending maintenance items recorded in state.json: ${pending}. Call cognition_overview to load the index and resolve them.`
-                : 'No pending maintenance items; call cognition_overview before the first edits and cognition_scan after development to stay aligned.',
-            ].join('\n'),
-          }
+          const pending = (stateData?.pending?.length ?? 0) + (stateData?.database?.pending?.length ?? 0)
+          // Lightweight drift summary from recorded state only (no rescan): the
+          // stale count uses entry hashes versus nothing on disk — unavailable
+          // without a walk — so report the recorded pending list and entry/file
+          // record skew instead.
+          const fileRecords = Object.keys(stateData?.files ?? {}).length
+          const entryRecords = Object.keys(stateData?.entries ?? {}).length
+          const unauthored = fileRecords - entryRecords
+          const lines = [`VERDICT: whitelisted-indexed. ${root} has a cognition index; keep it dynamically maintained.`]
+          if (pending > 0) lines.push(`Pending maintenance items recorded in state.json: ${pending}. Call cognition_overview to load the index and resolve them.`)
+          else lines.push('No pending maintenance items; call cognition_overview before the first edits and cognition_scan after development to stay aligned.')
+          if (unauthored > 0) lines.push(`${unauthored} managed file(s) have no entry yet (files ${fileRecords} vs entries ${entryRecords}); cognition_scan refreshes the authoring plan.`)
+          if (fileRecords === 0) lines.push('state.json has no file records yet — run cognition_scan to establish the baseline.')
+          return { text: lines.join('\n') }
         }
         return {
           text: [
