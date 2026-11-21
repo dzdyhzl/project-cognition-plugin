@@ -420,3 +420,42 @@ test('panel: snapshot exposes chunkPlan and deterministic nextActions', async ()
   assert.equal(empty.indexExists, false)
   await rm(root, { recursive: true, force: true })
 })
+
+test('ddl: pg_dump separate constraints and CREATE INDEX fold into evidence', async () => {
+  const ddl = await mod('lib/ddl.js')
+  const pgDump = [
+    'CREATE TABLE public.orders (',
+    '    id integer NOT NULL,',
+    '    user_id integer NOT NULL,',
+    '    total numeric(10,2)',
+    ');',
+    'ALTER TABLE public.orders',
+    '    ADD CONSTRAINT orders_pkey PRIMARY KEY (id);',
+    'ALTER TABLE public.orders',
+    '    ADD CONSTRAINT orders_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id);',
+    'ALTER TABLE public.orders',
+    '    ADD CONSTRAINT orders_total_check CHECK (total >= 0);',
+    'CREATE UNIQUE INDEX orders_email_uq ON public.orders USING btree (email);',
+    'CREATE INDEX orders_user_idx ON public.orders (user_id);',
+  ].join('\n')
+  const ev = ddl.parseDdl(pgDump, { sourceId: 'pg', engine: 'postgresql' })
+  const orders = ev.tables.find(t => t.name === 'orders')
+  assert.deepEqual(orders.primaryKey, ['id'])
+  assert.equal(orders.foreignKeys.length, 1)
+  assert.equal(orders.foreignKeys[0].refTable, 'public.users')
+  assert.deepEqual(orders.uniques, [['email']])
+  assert.deepEqual(orders.indexes, [['user_id']])
+  assert.equal(ev.parseWarnings.length, 0)
+
+  // mysqldump style: ALTER TABLE ADD PRIMARY KEY / KEY / UNIQUE
+  const mysqlAlt = ddl.parseDdl([
+    'CREATE TABLE `orders` (`id` int NOT NULL, `user_id` int NOT NULL, `email` varchar(255));',
+    'ALTER TABLE `orders` ADD PRIMARY KEY (`id`);',
+    'ALTER TABLE `orders` ADD KEY `idx_user` (`user_id`);',
+    'ALTER TABLE `orders` ADD UNIQUE `uk_email` (`email`);',
+  ].join('\n'), { engine: 'mysql' })
+  const mo = mysqlAlt.tables[0]
+  assert.deepEqual(mo.primaryKey, ['id'])
+  assert.deepEqual(mo.indexes, [['user_id']])
+  assert.deepEqual(mo.uniques, [['email']])
+})

@@ -10,10 +10,10 @@ package.json[FG5]: F:bundle 清单：包名 @local/project-cognition、版本、
 panel.js[CG7]: F:只读面板 Host 服务：panelData 快照（卷摘要、漂移、覆盖率、token 规模、chunk 计划、nextActions 下一步建议、数据库 evidence、verify）、sessionGate 名单事实、gateDecision 写名单 | R:code:lib/format.js,code:lib/scanner.js,code:lib/state.js,code:lib/registry.js | A:panelData, sessionGate, gateDecision | S:nextActions 由快照事实确定性推导（待维护/漂移/违规数），无索引路径提前返回不带此字段；chunkPlan 与 overview 共用估算器；Typert Remote 直连
 
 ===docs/===
-DETAIL.md[SG6]: F:中文详细文档：功能清单、索引文件布局、使用建议与边界 | R:code:index.js | A:- | S:与 README 保持同步；含下一步建议、面板分块计划、回归测试、刷新阈值、跨宿主规则块、影响分析、快照演化说明
+DETAIL.md[SG6]: F:中文详细文档：功能清单、索引文件布局、使用建议与边界 | R:code:index.js | A:- | S:与 README 保持同步；含 DDL 解析增强、下一步建议、面板分块计划、回归测试、刷新阈值、跨宿主规则块、影响分析、快照演化说明
 
 ===lib/===
-ddl.js[KZ7M]: F:DDL 解析器：把 mysqldump/pg_dump/手写 .sql 文本解析为结构化 Schema Evidence（表、列、PK/FK/唯一键/索引），并显式报告无法解析的内容。 | R:- | A:parseDdl(text, { sourceId, engine }) | S:只覆盖常见方言表面（反引号/双引号标识符、MySQL COMMENT/ENGINE、PostgreSQL 类型、常见约束）；解析失败进入 parseWarnings 而非静默丢弃。
+ddl.js[CG8]: F:DDL 解析为 Schema Evidence：CREATE TABLE 内联约束 + pg_dump 分离语句折叠（ALTER TABLE ADD CONSTRAINT PRIMARY KEY/UNIQUE/FOREIGN KEY...REFERENCES、MySQL ADD PRIMARY KEY/KEY/UNIQUE、CREATE [UNIQUE] INDEX ... ON x USING btree） | R:code:index.js,code:test/plugin.test.js | A:parseDdl(text, { sourceId, engine }) | S:表引用经 lookup 支持裸名/schema 限定/引号形式；parseColumnList 期望带括号子句，分离约束须传入完整子句文本；无法识别的 FK 显式告警不静默
 format.js[CG8]: F:索引纯文本协议核心：Root/Meta 解析、标签字典与 S 配额解析、FRAS 校验、分卷序列化/上Upsert/删除、原子写入、token 估算 | R:- | A:parseCodeVolume, validateEntry, upsertEntries, removeEntries, serializeCodeVolume, serializeDatabaseVolume, atomicWriteText, estimateTokens | S:estimateTokens 按 CJK/1.5 其余/4 粗估，仅用于分块预算不是计费值；无法识别的行原样保留进 extras
 registry.js[CG7]: F:白/黑名单持久注册表：互斥双清单、Windows 稳定路径键、原子写、读-改-写锁窗口 | R:code:index.js,code:test/plugin.test.js | A:allowedAdd, allowedRemove, declinedAdd, declinedRemove, allowedFor, declinedFor, listAllowed, listDeclined, registryPath | S:registryPath 支持 PROJECT_COGNITION_REGISTRY 环境变量覆盖（测试隔离）；锁文件超 15s 视为弃置
 scanner.js[CG8]: F:受管文件清点（gitignore/.cognitionignore 迷你匹配器、嵌套作用域）、SHA-256 哈希与行数统计、漂移比对、覆盖率统计 coverageStats | R:- | A:scanInventory, hashFiles, compareDrift, coverageStats, sha256, ALWAYS_SKIP | S:行数按 \n 计且末行无换行不丢；覆盖率把已删文件条目单独记 missingEntries
@@ -25,4 +25,4 @@ en.json[SG4]: F:英文界面文案：插件元信息、14 个工具摘要、面�
 zh.json[SG4]: F:中文界面文案：插件元信息、14 个工具摘要、面板标签（含分块计划/下一步建议） | R:- | A:- | S:工具 summary 由 DSH 读取展示，改字段需同步 en.json
 
 ===test/===
-plugin.test.js[TG8]: F:回归测试套件（node:test，零依赖，19 例）：纯函数库 + 全部 cognition_* 工具链路 + 面板服务（chunkPlan/nextActions 确定性、无索引空态） | R:code:index.js,code:panel.js,code:lib/ddl.js | A:npm test（node --test test/） | S:gate/registry 测试经 PROJECT_COGNITION_REGISTRY 隔离；面板测试用真实 PanelService 实例 + mock reflect
+plugin.test.js[TG8]: F:回归测试套件（node:test，零依赖，20 例）：纯函数库 + 全部 cognition_* 工具链路 + 面板服务 + pg_dump/mysqldump 分离约束解析 | R:code:index.js,code:panel.js,code:lib/ddl.js | A:npm test（node --test test/） | S:gate/registry 测试经 PROJECT_COGNITION_REGISTRY 隔离；面板测试用真实 PanelService 实例 + mock reflect
