@@ -17,7 +17,8 @@
     "cognition_database_scan": "Detect table-level drift (missing/orphan entries).",
     "cognition_verify": "Re-validate every volume's entries; returns the alignment verdict.",
     "cognition_gate": "Per-conversation gate: resolves the project against the whitelist/blacklist — blacklisted (do nothing), whitelisted (create or dynamically maintain the index), or unlisted (ask via the overlay question, then record the choice).",
-    "cognition_registry": "Maintain the project registry (~/.dsh/project-cognition.json): list shows both lists, decline blacklists, allow lifts a blacklist record, whitelist adds to the whitelist, unwhitelist removes it."
+    "cognition_registry": "Maintain the project registry (~/.dsh/project-cognition.json): list shows both lists, decline blacklists, allow lifts a blacklist record, whitelist adds to the whitelist, unwhitelist removes it.",
+    "cognition_doctor": "Diagnose the cognition setup: volume skeleton, meta dictionaries, state integrity, schema evidence, drift, coverage, and index size; returns an itemized HEALTHY / WARN / FAIL report."
   },
   "panel": "Read-only panel: inspect index status, drift, and the verify verdict"
 }

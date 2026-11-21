@@ -1,7 +1,7 @@
 # @local/project-cognition — 项目认知索引
 
 [![DSH Plugin](https://img.shields.io/badge/platform-DeepSeek%20Harness-blue)](https://github.com/dzdyhzl/project-cognition-plugin)
-[![Version](https://img.shields.io/badge/version-1.4.0-green)](./package.json)
+[![Version](https://img.shields.io/badge/version-1.6.0-green)](./package.json)
 
 在每个项目的 `.cognition/` 目录维护一套**随 Git 版本化的纯文本认知索引**，让 AI 会话读一次索引即可获得项目全局认知，而不是每个任务都重新搜索、重读整个代码库。代码变化后可检测漂移并增量维护，索引始终与代码对齐。
 
@@ -44,6 +44,7 @@ lib/scanner.js[CG9]: F:职责 | R:code:lib/state.js,... | A:导出接口 | S:非
 | `cognition_verify` | 聚合门禁：重校验全部卷的条目，返回对齐结论或违规清单 |
 | `cognition_gate` | 每次会话开始的门禁：黑名单不处理；白名单建索引或动态维护；未登记时经覆盖对话框询问一次并把选择写入对应名单 |
 | `cognition_registry` | 维护白/黑名单注册表（decline / allow / whitelist / unwhitelist / list） |
+| `cognition_doctor` | 诊断索引环境：分卷骨架、Meta 字典、state 完整性、schema evidence、漂移、覆盖率与索引规模，输出逐项 HEALTHY / WARN / FAIL 报告 |
 
 ## 快速开始
 

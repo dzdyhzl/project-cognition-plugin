@@ -8,6 +8,8 @@
 - **撰写条目**：模型读真实源码后，用 `cognition_update_entries` 为每个文件写一条 FRAS 条目 —— F 职责 / R 强关系 / A 对外接口 / S 非显而易见约束，外加紧凑标签（如 `CG9`）。插件只校验结构（字段齐全、标签在字典内、S 配额、路径可解析），不伪造语义。
 - **读取认知**：新会话开始时调用 `cognition_overview` 一次，读整份索引建立全局认知；大索引可分块读取并用 `cognition_search` 按标签/关键词过滤。
 - **增量维护**：开发完成后调用 `cognition_scan` 检测漂移（Missing 已删文件 / Orphan 新文件 / Stale 内容已变），用 `cognition_update_entries` / `cognition_remove_entries` 补齐，索引回到与代码对齐的状态。
+- **覆盖率与规模**：overview 与 scan 报告索引覆盖了多少受管代码（文件数/行数百分比），并估算索引的 token 规模；大索引的 overview 分块按估算 token 预算（默认 7000，配置 `overviewChunkTokens`）切分，而不是固定条数。
+- **诊断**：`cognition_doctor` 一次性体检索引环境——分卷骨架、Meta 字典可解析、state.json 完整性（v1/v2、条目/文件哈希一致性、待办清单异常）、schema evidence 与声明一致性、漂移摘要、覆盖率、索引规模与分块预算；输出逐项 HEALTHY / WARN / FAIL 结论，索引行为异常或从 Git 恢复后可运行。
 - **只读 Web 面板**：左侧栏新增"项目认知索引"页：选一个已登记的工作区，即可查看代码/数据库条目数、漂移计数（missing/orphan/stale）、待写清单、数据库 evidence 状态与 verify 对齐结论，30 秒自动刷新可关。面板严格只读，所有写入仍通过会话中的 cognition_* 工具完成。
 - **白/黑名单门禁**：`cognition_gate` 在每次会话开始时把项目对照 `~/.dsh/project-cognition.json` 里的两份名单（白名单 allowed / 黑名单 declined，二者互斥）：黑名单项目不处理，也不建议建索引；白名单项目已有索引则动态维护（开发后 `cognition_scan` → `cognition_update_entries` / `cognition_remove_entries`），没有索引则立即创建；两表都未登记时，模型通过用户问答覆盖对话框询问一次"是否创建 cognition"，用户选创建→写入白名单并开始建索引，选拒绝→写入黑名单。`cognition_registry` 的 `list` 展示两份名单，`whitelist`/`unwhitelist`/`decline`/`allow` 分别维护白/黑名单。
 - **数据库认知（可选）**：`cognition_database_init` 导入一份 .sql DDL dump（mysqldump / pg_dump 输出，本地文件，零网络）作为 Schema Evidence，随后为每张表写表级 FRAS 条目；`cognition_database_scan` 检测表级漂移；`cognition_verify` 一次性重校验两个卷的全部条目。

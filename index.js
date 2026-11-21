@@ -4,8 +4,9 @@
  * session reads the whole map once instead of re-discovering the codebase.
  *
  * Simplified re-implementation of the core method of https://github.com/aoci-spec/aoci-code
- * (FRAS entries, Root/Meta/Code volumes, drift detection, incremental maintenance),
- * without the database cognition, governance state machine, or MCP server.
+ * (FRAS entries, Root/Meta/Code volumes, drift detection, incremental maintenance,
+ * coverage stats, token-aware chunked overview delivery, doctor diagnostics),
+ * without the governance state machine or MCP server.
  * @module
  */
 
@@ -36,6 +37,7 @@ const DEFAULT_CONFIG = Object.freeze({
   maxFileBytes: 524288,
   locale: 'zh-CN',
   maxOverviewEntries: 400,
+  overviewChunkTokens: 7000,
   include: [],
   excludeDirs: [],
 })
@@ -54,6 +56,10 @@ function resolveConfig(config = {}) {
   if (config.maxOverviewEntries !== undefined) {
     if (!Number.isInteger(config.maxOverviewEntries) || config.maxOverviewEntries < 1) throw new Error('project-cognition: maxOverviewEntries must be a positive integer')
     merged.maxOverviewEntries = config.maxOverviewEntries
+  }
+  if (config.overviewChunkTokens !== undefined) {
+    if (!Number.isInteger(config.overviewChunkTokens) || config.overviewChunkTokens < 2000 || config.overviewChunkTokens > 30000) throw new Error('project-cognition: overviewChunkTokens must be an integer between 2000 and 30000')
+    merged.overviewChunkTokens = config.overviewChunkTokens
   }
   if (config.include !== undefined) {
     if (!Array.isArray(config.include)) throw new Error('project-cognition: include must be an array of strings')
@@ -80,6 +86,8 @@ const PROMPT_TEXT = [
 ].join(' ')
 
 const fmt = format
+const estimateTokens = format.estimateTokens
+const coverageStats = scanner.coverageStats
 const cognitionPaths = state.cognitionPaths
 const evidencePath = state.evidencePath
 const loadState = state.loadState
@@ -208,6 +216,16 @@ function tool(ctx, definition) {
   ctx.tools.register(definition)
 }
 
+/** Render the doctor report text from collected items. */
+function renderDoctor(root, items) {
+  const lines = [`# cognition_doctor — ${root}`]
+  const fails = items.filter(item => item.level === 'FAIL').length
+  const warns = items.filter(item => item.level === 'WARN').length
+  lines.push(`verdict: ${fails > 0 ? 'NEEDS_ATTENTION' : warns > 0 ? 'USABLE_WITH_WARNINGS' : 'HEALTHY'} (${items.length} checks, ${fails} fail, ${warns} warn)`)
+  for (const item of items) lines.push(`[${item.level}] ${item.check}: ${item.detail}`)
+  return { text: lines.join('\n') }
+}
+
 /**
  * Plugin entry: register the six cognition tools and the prompt section.
  * @param ctx Cordis context
@@ -218,6 +236,7 @@ export function apply(ctx, userConfig = {}) {
   const maxFileBytes = config.maxFileBytes
   const localeDefault = config.locale
   const maxOverviewEntries = config.maxOverviewEntries
+  const chunkTokenBudget = config.overviewChunkTokens
   const extraExtensions = config.include
   const extraExcludeDirs = new Set(config.excludeDirs ?? [])
 
@@ -282,6 +301,8 @@ export function apply(ctx, userConfig = {}) {
       const lines = []
       lines.push(`# Project: ${header['Project'] ?? basename(root)} (index format ${header['Format-Version'] ?? '?'}, locale ${header['Locale'] ?? '?'})`)
       lines.push(`# Entries: ${entryCount} files across ${parsed.sections.filter(section => section.entries.length > 0).length} directories`)
+      const indexTokens = fmt.estimateTokens(codeText) + fmt.estimateTokens(metaText) + fmt.estimateTokens(rootText)
+      lines.push(`# Index size: ~${indexTokens} tokens`)
       if (parsed.parseErrors.length > 0) lines.push(`# Volume parse warnings: ${parsed.parseErrors.length} unrecognized lines (preserved verbatim)`)
       lines.push('')
       if (chunked) {
@@ -293,8 +314,33 @@ export function apply(ctx, userConfig = {}) {
             flat.push(fmt.serializeEntry({ path: fullPath, tags: entry.tags, f: entry.f, r: entry.r, a: entry.a, s: entry.s }))
           }
         }
-        const totalChunks = Math.max(1, Math.ceil(flat.length / chunkEntries))
+        // Chunk boundaries: fixed entry count when chunk_entries is given,
+        // otherwise sized by the estimated token budget (AOCI's chunk_tokens
+        // model): dense entries pack fewer lines per chunk, small ones more.
+        const entryTokens = flat.map(line => estimateTokens(line) + 1)
+        let boundaries
+        if (args.chunk_entries !== undefined) {
+          boundaries = []
+          for (let start = 0; start < flat.length; start += chunkEntries) boundaries.push([start, Math.min(start + chunkEntries, flat.length)])
+        } else {
+          const fixedOverhead = estimateTokens(rootText) + estimateTokens(metaText) + 40
+          boundaries = []
+          let start = 0
+          while (start < flat.length) {
+            let budget = chunkTokenBudget - (start === 0 ? fixedOverhead : 10)
+            let end = start
+            let used = 0
+            while (end < flat.length && (end === start || used + entryTokens[end] <= budget)) {
+              used += entryTokens[end]
+              end++
+            }
+            boundaries.push([start, end])
+            start = end
+          }
+        }
+        const totalChunks = Math.max(1, boundaries.length)
         const chunkIndex = Math.min(args.chunk, totalChunks)
+        const [from, to] = boundaries[chunkIndex - 1] ?? [0, 0]
         if (chunkIndex === 1) {
           lines.push('## Root manifest')
           lines.push(rootText.trimEnd())
@@ -303,8 +349,8 @@ export function apply(ctx, userConfig = {}) {
           lines.push(metaText.trimEnd())
           lines.push('')
         }
-        lines.push(`## Code volume (chunk ${chunkIndex}/${totalChunks}, ${chunkEntries} entries per chunk)`)
-        lines.push(flat.slice((chunkIndex - 1) * chunkEntries, chunkIndex * chunkEntries).join('\n'))
+        lines.push(`## Code volume (chunk ${chunkIndex}/${totalChunks}, entries ${from + 1}-${to} of ${flat.length})`)
+        lines.push(flat.slice(from, to).join('\n'))
         lines.push('')
         if (chunkIndex < totalChunks) {
           lines.push(`NEXT_CHUNK: ${chunkIndex + 1} — call cognition_overview again with chunk=${chunkIndex + 1} (of ${totalChunks}) before doing task work.`)
@@ -337,6 +383,17 @@ export function apply(ctx, userConfig = {}) {
           lines.push(`The database volume holds ${dbCount} entries (over the budget ${maxOverviewEntries}).`)
           lines.push('Use cognition_search with volume="database" to query it, and cognition_database_scan for table drift.')
         }
+      }
+      // Coverage facts (AOCI panel metric, simplified): how much managed code the index describes.
+      if (state !== null) {
+        try {
+          const walked = await scanner.scanInventory(root, { maxFileBytes, excludeDirs: [...extraExcludeDirs], include: extraExtensions })
+          await scanner.hashFiles(root, walked.files)
+          const coverage = scanner.coverageStats(walked.files, state)
+          lines.push('')
+          lines.push(`## Coverage: ${coverage.indexedFiles}/${coverage.totalFiles} files (${Math.round(coverage.coverageFiles * 100)}%), ${coverage.indexedLines}/${coverage.totalLines} lines (${Math.round(coverage.coverageLines * 100)}%)`)
+          if (coverage.missingEntries > 0) lines.push(`Coverage excludes ${coverage.missingEntries} indexed files that no longer exist on disk (run cognition_scan for drift facts).`)
+        } catch { /* coverage is best-effort */ }
       }
       const pending = state?.pending ?? []
       if (pending.length > 0) {
@@ -449,8 +506,10 @@ export function apply(ctx, userConfig = {}) {
       state.pending = work
       await saveState(paths.state, state)
       const lines = []
+      const coverage = scanner.coverageStats(inventory, state)
       lines.push(`# Scan of ${basename(root)}`)
       lines.push(`managed files: ${inventory.size} | skipped (non-text/over-size): ${walked.skipped.length}`)
+      lines.push(`coverage: ${coverage.indexedFiles}/${coverage.totalFiles} files (${Math.round(coverage.coverageFiles * 100)}%), ${coverage.indexedLines}/${coverage.totalLines} lines (${Math.round(coverage.coverageLines * 100)}%)`)
       lines.push(`drift: missing=${drift.missing.length} orphan=${drift.orphan.length} stale=${drift.stale.length} unchanged=${drift.unchanged.length}`)
       if (drift.missing.length > 0) {
         lines.push('')
@@ -1010,6 +1069,110 @@ export function apply(ctx, userConfig = {}) {
       return { text: lines.join('\n') }
     },
     presentCall: (args) => ({ card: 'generic', title: 'Verify cognition index', kind: 'read' }),
+  })
+
+  // ----------------------------------------------------------------- doctor
+  tool(ctx, {
+    name: 'cognition_doctor',
+    description: 'Diagnose a project cognition setup (read-only): checks the volume skeleton, Meta dictionary completeness, state.json integrity (v1/v2, hash consistency), pending-list sanity, schema evidence presence, drift summary, and index token size against the chunk budget. Returns an itemized HEALTHY / WARN / FAIL report. Run this when the index behaves oddly or after restoring from Git.',
+    parameters: {
+      type: 'object',
+      properties: {
+        project: { type: 'string', description: 'Project root directory. Defaults to the session working directory.' },
+      },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => renderText(value),
+    },
+    async execute(args, exec) {
+      const root = await resolveProjectRoot(ctx, exec.agent, args.project)
+      const paths = cognitionPaths(root)
+      const items = []
+      const add = (level, check, detail) => items.push({ level, check, detail })
+
+      // 1. Volume skeleton
+      const present = {}
+      for (const [label, file] of [['root', paths.root], ['meta', paths.meta], ['code', paths.code], ['database', paths.database], ['state', paths.state]]) {
+        present[label] = await fileExists(file)
+      }
+      if (!present.root) {
+        add('FAIL', 'volume skeleton', 'no cognition.txt — no index here; cognition_init creates one')
+        return renderDoctor(root, items)
+      }
+      add('HEALTHY', 'volume skeleton', `root${present.meta ? '+meta' : ' (META MISSING)'}${present.code ? '+code' : ' (CODE MISSING)'}${present.database ? '+database' : ''}${present.state ? '+state' : ' (STATE MISSING)'}`)
+      if (!present.meta) add('FAIL', 'meta volume', 'cognition.meta.txt missing — entries cannot be validated')
+      if (!present.code) add('WARN', 'code volume', 'cognition.code.txt missing — cognition_scan will not accept entries until init completes')
+
+      // 2. Root manifest parsable
+      const rootText = await readFile(paths.root, 'utf8')
+      const header = fmt.parseRootManifest(rootText)
+      const volumeLines = rootText.split(/\r?\n/).filter(line => line.startsWith('#Volume:')).length
+      add(volumeLines >= 2 ? 'HEALTHY' : 'WARN', 'root manifest', `format=${header['Format-Version'] ?? 'unknown'}, locale=${header['Locale'] ?? 'unknown'}, ${volumeLines} volume declaration(s)`)
+
+      // 3. Meta dictionaries
+      if (present.meta) {
+        const metaText = await readFile(paths.meta, 'utf8')
+        const codeDict = fmt.parseTagDictionary(metaText, 'code')
+        add(codeDict.size >= 3 ? 'HEALTHY' : 'FAIL', 'meta code dictionary', codeDict.size >= 3 ? `${codeDict.size} axes declared` : 'fewer than 3 tag axes parseable — entries will fail validation')
+        const dbDictDeclared = fmt.hasDictionarySection(metaText, 'database')
+        if (present.database && !dbDictDeclared) add('WARN', 'meta database dictionary', 'database volume exists but meta lacks the #[Tag dictionary: database] section (auto-appended on next database_init)')
+        else add('HEALTHY', 'meta database dictionary', dbDictDeclared ? 'declared' : 'not declared (only needed with a database volume)')
+        const quota = fmt.parseSQuota(metaText)
+        add(quota ? 'HEALTHY' : 'WARN', 'S quota', quota ? `limits parsed for ${Object.keys(quota).length} importance bands` : 'no S quota parsed; validation falls back to 200 chars')
+      }
+
+      // 4. state.json integrity
+      const stateData = await loadState(paths.state)
+      if (stateData === null) {
+        add(present.state ? 'FAIL' : 'WARN', 'state.json', present.state ? 'present but unreadable/corrupt — cognition_init will not fix it; delete or repair the file' : 'absent')
+      } else {
+        const fileCount = Object.keys(stateData.files ?? {}).length
+        const entryCount = Object.keys(stateData.entries ?? {}).length
+        const pendingCount = (stateData.pending ?? []).length
+        const pendingSanity = (stateData.pending ?? []).filter(path => stateData.entries?.[path] === undefined && stateData.files?.[path] === undefined).length
+        add('HEALTHY', 'state.json', `v${stateData.stateVersion}, ${fileCount} files, ${entryCount} entries, ${pendingCount} pending`)
+        if (pendingSanity > 0) add('WARN', 'pending list', `${pendingSanity} pending paths reference neither an entry nor a file record; cognition_scan rebuilds the list`)
+        if (entryCount > fileCount) add('WARN', 'entry/file ratio', `${entryCount} entries vs ${fileCount} file records — run cognition_scan to reconcile hashes`)
+      }
+
+      // 5. Schema evidence when a database source is declared
+      const sources = stateData?.database?.sources ?? {}
+      if (Object.keys(sources).length > 0) {
+        for (const [sourceId, source] of Object.entries(sources)) {
+          const evidence = await loadEvidence(root, sourceId)
+          if (evidence === null) add('FAIL', `schema evidence ${sourceId}`, 'declared in state.json but the evidence file is missing — re-run cognition_database_init with the dump')
+          else {
+            const tableCount = (evidence.tables ?? []).length
+            add(tableCount > 0 ? 'HEALTHY' : 'WARN', `schema evidence ${sourceId}`, `${tableCount} tables, dump sha ${String(source.dumpSha256 ?? '').slice(0, 12)}`)
+          }
+        }
+      }
+
+      // 6. Drift quick pass (only when state is readable)
+      if (stateData !== null) {
+        try {
+          const walked = await scanner.scanInventory(root, { maxFileBytes, excludeDirs: [...extraExcludeDirs], include: extraExtensions })
+          await scanner.hashFiles(root, walked.files)
+          const drift = scanner.compareDrift(walked.files, stateData)
+          const drifted = drift.missing.length + drift.orphan.length + drift.stale.length
+          add(drifted === 0 ? 'HEALTHY' : 'WARN', 'drift', `missing=${drift.missing.length} orphan=${drift.orphan.length} stale=${drift.stale.length} — cognition_scan reports the batch plan`)
+          const coverage = scanner.coverageStats(walked.files, stateData)
+          add('HEALTHY', 'coverage', `${coverage.indexedFiles}/${coverage.totalFiles} files (${Math.round(coverage.coverageFiles * 100)}%), ${coverage.indexedLines}/${coverage.totalLines} lines`)
+        } catch (error) {
+          add('WARN', 'drift scan', `scan failed: ${error.message}`)
+        }
+      }
+
+      // 7. Index size vs chunk budget
+      if (present.code) {
+        const codeText = await readFile(paths.code, 'utf8')
+        const tokens = fmt.estimateTokens(codeText) + (present.meta ? fmt.estimateTokens(await readFile(paths.meta, 'utf8')) : 0)
+        add(tokens <= chunkTokenBudget ? 'HEALTHY' : 'WARN', 'index size', `~${tokens} tokens; ${tokens <= chunkTokenBudget ? 'fits one overview delivery' : `exceeds the ${chunkTokenBudget}-token chunk budget — overview delivers in chunks`}`)
+      }
+      return renderDoctor(root, items)
+    },
+    presentCall: (args) => ({ card: 'generic', title: `Diagnose cognition setup${args?.project ? `: ${args.project}` : ''}`, kind: 'read' }),
   })
 
   // ---------------------------------------------------------------- gate
