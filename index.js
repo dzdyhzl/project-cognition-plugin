@@ -1037,7 +1037,7 @@ export function apply(ctx, userConfig = {}) {
       await saveState(paths.state, state)
       const lines = [
         `# cognition_database_init`,
-        `source: ${args.source_id} (${evidence.engine}) | tables parsed: ${evidence.tables.length} | checks: ${evidence.tables.reduce((sum, table) => sum + (table.checks?.length ?? 0), 0)} | dump sha256: ${evidence.dumpSha256.slice(0, 12)}…`,
+        `source: ${args.source_id} (${evidence.engine}) | tables parsed: ${evidence.tables.length} | checks: ${evidence.tables.reduce((sum, table) => sum + (table.checks?.length ?? 0), 0)} | column comments: ${evidence.tables.reduce((sum, table) => sum + (table.columns ?? []).filter(col => col.comment !== undefined).length, 0)} | dump sha256: ${evidence.dumpSha256.slice(0, 12)}…`,
         `evidence ${previousSource === undefined ? 'imported' : evidenceChanged ? 'changed — all tables marked pending re-check' : 'unchanged — pending list only gained tables without entries'}`,
         ...(metaUpgraded ? ['Meta upgraded: appended the #[Tag dictionary: database] section.'] : []),
         ...(evidence.parseWarnings.length > 0 ? [`parse warnings: ${evidence.parseWarnings.join('; ')}`] : []),

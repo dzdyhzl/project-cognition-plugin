@@ -529,3 +529,21 @@ test('tools: impact crosses volumes — database table reaches code entries alon
   assert.match(imp.text, /src\/service\.js/)
   await rm(root, { recursive: true, force: true })
 })
+
+test('ddl: column comments are captured from MySQL inline COMMENT and PostgreSQL COMMENT ON', async () => {
+  const ddl = await mod('lib/ddl.js')
+  // mysql inline
+  const my = ddl.parseDdl('CREATE TABLE `users` (`id` INT NOT NULL COMMENT \'用户ID\', `email` VARCHAR(255));', { engine: 'mysql' })
+  assert.equal(my.tables[0].columns[0].comment, '用户ID')
+  assert.equal(my.tables[0].columns[1].comment, undefined)
+  // postgres separate statements, schema-qualified, with an escaped quote and an unmatched column warning
+  const pg = ddl.parseDdl([
+    'CREATE TABLE public.orders (id integer, total numeric);',
+    "COMMENT ON COLUMN public.orders.total IS '订单总金额，含税';",
+    "COMMENT ON COLUMN public.orders.ghost IS '不存在的列';",
+  ].join('\n'), { engine: 'postgresql' })
+  const total = pg.tables[0].columns.find(col => col.name === 'total')
+  assert.equal(total.comment, '订单总金额，含税')
+  assert.equal(pg.tables[0].columns.find(col => col.name === 'id').comment, undefined)
+  assert.ok(pg.parseWarnings.some(w => w.includes('ghost has no matching parsed column')))
+})
