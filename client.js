@@ -58,6 +58,8 @@ window.__ModuleLoader__.load({
       chunkPlan: '分块计划',
       chunkPlanFull: '整卷一次交付',
       chunkPlanMulti: '{chunks} 块交付（预算 {budget} token/块）',
+      nextTitle: '下一步建议',
+      copied: '已复制',
       coverageFiles: '文件',
       coverageLines: '行',
       coverageMissing: '已删文件条目',
@@ -113,6 +115,8 @@ window.__ModuleLoader__.load({
       chunkPlan: 'Chunk plan',
       chunkPlanFull: 'single delivery',
       chunkPlanMulti: '{chunks} chunks ({budget} tokens each)',
+      nextTitle: 'Suggested next input',
+      copied: 'Copied',
       coverageFiles: 'files',
       coverageLines: 'lines',
       coverageMissing: 'entries for deleted files',
@@ -190,6 +194,24 @@ window.__ModuleLoader__.load({
       return h('div', null,
         h('div', { className: 'pcp-note' }, `${title} (${items.length}):`),
         h('ul', { className: 'pcp-list' }, items.map(item => h('li', { key: item }, item))))
+    }
+
+    function NextActions({ actions }) {
+      const [copiedIndex, setCopiedIndex] = useState(-1)
+      if (!actions || actions.length === 0) return null
+      const copy = async (text, index) => {
+        try {
+          await navigator.clipboard.writeText(text)
+          setCopiedIndex(index)
+          setTimeout(() => setCopiedIndex(-1), 1500)
+        } catch { /* clipboard unavailable: user can still select the text */ }
+      }
+      return h('div', null, actions.map((action, index) => h('div', { key: index, className: 'pcp-entry' },
+        h('div', { style: { fontWeight: 600 } }, action.title),
+        h('div', { className: 'pcp-note' }, action.prompt),
+        h('button', { className: 'pcp-btn', onClick: () => copy(action.prompt, index) },
+          copiedIndex === index ? t('copied') : '\u29C9'),
+      )))
     }
 
     function PanelPage({ api, workspaces, t, locale }) {
@@ -304,6 +326,8 @@ window.__ModuleLoader__.load({
           `${t('chunkPlan')}: ${data.chunkPlan.fullDelivery
             ? t('chunkPlanFull')
             : t('chunkPlanMulti', { chunks: data.chunkPlan.chunks, budget: data.chunkPlan.budget })}`),
+        h('div', { className: 'pcp-section' }, t('nextTitle')),
+        h(NextActions, { actions: data.nextActions }),
         (data.pending?.code?.length ?? 0) + (data.pending?.database?.length ?? 0) > 0 && h('div', null,
           h('div', { className: 'pcp-section' }, t('pendingTitle')),
           h(DriftList, { title: t('pendingCode'), items: data.pending.code }),

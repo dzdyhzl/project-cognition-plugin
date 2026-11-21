@@ -389,3 +389,34 @@ test('tools: overview delivers whole small index and reports tokens and coverage
   assert.match(chunked.text, /chunk 1\//)
   await rm(root, { recursive: true, force: true })
 })
+
+test('panel: snapshot exposes chunkPlan and deterministic nextActions', async () => {
+  const { default: PanelService } = await mod('panel.js')
+  const root = await makeProject({ 'src/a.js': 'x\n' })
+  const tools = await loadPlugin(root)
+  const exec = { agent: 'test' }
+  await tools.cognition_init.execute({}, exec)
+  // no entries yet: pending-driven advice
+  const service = new PanelService({ reflect: { provide: () => {} } })
+  const snap1 = await service.panelData({ project: root })
+  assert.ok(snap1.indexExists)
+  assert.equal(snap1.chunkPlan.entries, 0)
+  assert.equal(snap1.chunkPlan.fullDelivery, true)
+  assert.ok(snap1.nextActions.length > 0)
+  assert.ok(snap1.nextActions[0].prompt.length > 10)
+
+  // align one entry, orphan another file: drift-driven advice
+  await writeFile(join(root, 'src/b.js'), 'y\n', 'utf8')
+  await tools.cognition_update_entries.execute({ entries: [{ path: 'src/a.js', tags: 'CG5', f: 'a', r: '-', a: 'a', s: '-' }] }, exec)
+  const snap2 = await service.panelData({ project: root })
+  const driftAction = snap2.nextActions.find(action => action.title.includes('漂移'))
+  assert.ok(driftAction, 'drift advice expected')
+  // deterministic: same facts → same advice
+  const snap3 = await service.panelData({ project: root })
+  assert.deepEqual(snap2.nextActions, snap3.nextActions)
+
+  // no index: early snapshot explains the empty state
+  const empty = await service.panelData({ project: join(root, 'src') })
+  assert.equal(empty.indexExists, false)
+  await rm(root, { recursive: true, force: true })
+})

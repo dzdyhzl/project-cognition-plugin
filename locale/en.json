@@ -20,5 +20,5 @@
     "cognition_doctor": "Diagnose the cognition setup: volume skeleton, meta dictionaries, state integrity, schema evidence, drift, coverage, and index size; returns an itemized HEALTHY / WARN / FAIL report.",
     "cognition_search": "Filter entries by tag, path, keyword, or project forward/reverse R relations; relations=impact walks the transitive reverse closure along formal R edges (derived impact analysis)."
   },
-  "panel": "Read-only panel: inspect index status, drift, coverage, chunk plan, and the verify verdict"
+  "panel": "Read-only panel: inspect index status, drift, coverage, chunk plan, suggested next input, and the verify verdict"
 }

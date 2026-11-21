@@ -253,6 +253,28 @@ export class ProjectCognitionPanelService extends PanelServiceBase {
       chunkPlan = { entries: flat.length, chunks, fullDelivery: chunks <= 1, budget }
     }
 
+    // Recommended next input (AOCI panel metric, simplified): deterministic
+    // suggestions derived from the snapshot facts only — what the user should
+    // ask the AI to do next. No side effects, no guessing beyond the facts.
+    // panelData returns early when no index exists, so here the index is present.
+    const nextActions = []
+    {
+      const pendingCount = (state?.pending?.length ?? 0) + (state?.database?.pending?.length ?? 0)
+      const driftCount = drift === null ? 0 : (drift.missing?.length ?? 0) + (drift.orphan?.length ?? 0) + (drift.stale?.length ?? 0)
+      if (pendingCount > 0) {
+        nextActions.push({ title: `待维护 ${pendingCount} 项`, prompt: '调用 cognition_overview 读取索引，然后按 cognition_scan 的分批计划完成 cognition_update_entries / cognition_remove_entries，使索引回到 aligned。' })
+      }
+      if (driftCount > 0) {
+        nextActions.push({ title: `漂移 ${driftCount} 项`, prompt: '调用 cognition_scan 重新对齐：为 orphan 写条目、更新 stale 条目、用 cognition_remove_entries 清理 missing。' })
+      }
+      if (verify.violations?.length > 0) {
+        nextActions.push({ title: `校验违规 ${verify.violations.length} 条`, prompt: '调用 cognition_verify 查看违规清单，修正标签字典、S 配额或 R 引用后重新对齐。' })
+      }
+      if (nextActions.length === 0) {
+        nextActions.push({ title: '索引已对齐', prompt: '索引与代码已对齐，正常描述开发需求即可；开发完成后会自动 cognition_scan → cognition_update_entries 维护。' })
+      }
+    }
+
     return {
       project: header['Project'] ?? basename(root),
       root,
@@ -298,6 +320,7 @@ export class ProjectCognitionPanelService extends PanelServiceBase {
       },
       indexTokens: fmt.estimateTokens(rootText) + (metaText ? fmt.estimateTokens(metaText) : 0) + (codeRaw ? fmt.estimateTokens(codeRaw) : 0),
       chunkPlan,
+      nextActions,
       updatedAt: new Date().toISOString(),
     }
   }

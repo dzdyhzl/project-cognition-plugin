@@ -64,7 +64,7 @@ lib/scanner.js[CG9]: F:职责 | R:code:lib/state.js,... | A:导出接口 | S:非
 对标 AOCI-CODE 的受管规则块：`cognition_init` 传 `agents_md=true` 时，会在项目根的 `AGENTS.md` 追加一段以 `project-cognition:start/end` 定界的托管规则块（中文或英文随 locale），让 Codex、Claude Code、Cursor 等其他宿主的 Agent 也遵循同一索引工作流。块外内容绝不改动；再次 init 或 doctor 可检查块状态。
 ## 只读 Web 面板
 
-左侧栏新增"项目认知索引"页：选择一个已登记的工作区，即可查看代码/数据库条目数、漂移计数（missing / orphan / stale）、待写清单、覆盖率与索引 token 规模、Overview 分块计划、数据库 evidence 状态与 verify 对齐结论，30 秒自动刷新可关。面板严格只读，所有写入仍通过会话中的 `cognition_*` 工具完成。
+左侧栏新增"项目认知索引"页：选择一个已登记的工作区，即可查看代码/数据库条目数、漂移计数（missing / orphan / stale）、待写清单、覆盖率与索引 token 规模、Overview 分块计划、数据库 evidence 状态、verify 对齐结论，以及按当前事实推导的“下一步建议”（带复制按钮，对标 AOCI 面板的推荐输入），30 秒自动刷新可关。面板严格只读，所有写入仍通过会话中的 `cognition_*` 工具完成。
 
 ## 边界
 
