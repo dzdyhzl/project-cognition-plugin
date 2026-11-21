@@ -255,6 +255,52 @@ export class ProjectCognitionPanelService extends PanelServiceBase {
       updatedAt: new Date().toISOString(),
     }
   }
+
+  /**
+   * Gate facts for one project directory: registry coverage (whitelist or
+   * blacklist) and whether a cognition index already exists. The client gate
+   * overlay consumes this to decide whether the one-time question is raised.
+   * @param request { project: string } absolute project directory
+   */
+  async sessionGate(request) {
+    const project = String(request?.project ?? '').trim()
+    if (project.length === 0) throw new RemoteError('project-cognition/invalid-project', 'a project directory is required', {})
+    const root = isAbsolute(project) ? project : resolve(project)
+    let isDir = false
+    try {
+      isDir = statSync(root).isDirectory()
+    } catch {}
+    if (!isDir) throw new RemoteError('project-cognition/invalid-project', `not a directory: ${root}`, { path: root })
+    const declined = registry.declinedFor(root)
+    const allowed = registry.allowedFor(root)
+    const hasIndex = await fileExists(stateModule.cognitionPaths(root).root)
+    return {
+      project: root,
+      declined: declined !== null,
+      allowed: allowed !== null,
+      remark: declined?.remark ?? allowed?.remark ?? '',
+      hasIndex,
+    }
+  }
+
+  /**
+   * Record the user's gate answer from the overlay: accept whitelists the
+   * project, decline blacklists it. The registry enforces mutual exclusion.
+   * @param request { project: string, accept: boolean, remark?: string }
+   */
+  async gateDecision(request) {
+    const project = String(request?.project ?? '').trim()
+    if (project.length === 0) throw new RemoteError('project-cognition/invalid-project', 'a project directory is required', {})
+    const root = isAbsolute(project) ? project : resolve(project)
+    const accept = request?.accept === true
+    const remark = String(request?.remark ?? '')
+    if (accept) {
+      const result = await registry.allowedAdd(root, remark)
+      return { project: root, accepted: true, added: result.added }
+    }
+    const result = await registry.declinedAdd(root, remark)
+    return { project: root, accepted: false, added: result.added }
+  }
 }
 
 /** Record one method as a direct Remote invocation (plain-JS decorator shape). */
@@ -271,5 +317,8 @@ function markRemote(target, method) {
 }
 
 markRemote(ProjectCognitionPanelService.prototype, 'panelData')
+markRemote(ProjectCognitionPanelService.prototype, 'sessionGate')
+markRemote(ProjectCognitionPanelService.prototype, 'gateDecision')
 
 export default ProjectCognitionPanelService
+

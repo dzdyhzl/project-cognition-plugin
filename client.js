@@ -20,6 +20,13 @@ window.__ModuleLoader__.load({
 
     const zh = {
       panel: '项目认知索引',
+      gateTitle: '为这个项目维护认知索引吗？',
+      gateBody: '{path} 既不在白名单也不在黑名单。选择会写入名单，之后不再询问。',
+      gateAccept: '创建',
+      gateAcceptHint: '加入白名单并建立认知索引',
+      gateDecline: '拒绝',
+      gateDeclineHint: '加入黑名单，不再询问',
+      gateClose: '暂不选择（本次会话不再询问）',
       loading: '正在读取索引…',
       retry: '重试',
       refresh: '刷新',
@@ -61,6 +68,13 @@ window.__ModuleLoader__.load({
 
     const en = {
       panel: 'Project cognition index',
+      gateTitle: 'Maintain a cognition index for this project?',
+      gateBody: '{path} is on neither list. Your choice is recorded and you will not be asked again.',
+      gateAccept: 'Create',
+      gateAcceptHint: 'Whitelist and build the cognition index',
+      gateDecline: 'Decline',
+      gateDeclineHint: 'Blacklist and never ask again',
+      gateClose: 'Not now (no more prompts this session)',
       loading: 'Reading index…',
       retry: 'Retry',
       refresh: 'Refresh',
@@ -291,6 +305,122 @@ window.__ModuleLoader__.load({
         h('p', { className: 'pcp-note' }, `${t('updated', { time: new Date(data.updatedAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') })} · ${t('readonly')}`))
     }
 
+
+    // Self-contained stylesheet for the gate overlay: mounts in the
+    // shell.overlay seat, which renders even when the panel page has never
+    // been opened (same approach as github-workbench).
+    const GATE_CSS = `
+.pcp-gate-overlay { position: fixed; z-index: 40; display: flex; align-items: center; justify-content: center; }
+.pcp-gate-card { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  max-width: 560px; width: min(560px, calc(100% - 48px)); box-sizing: border-box; padding: 28px 32px; border-radius: 16px; text-align: center;
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-2, #fff) 62%, transparent);
+  backdrop-filter: blur(22px) saturate(1.4); -webkit-backdrop-filter: blur(22px) saturate(1.4);
+  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-label-primary) 14%, transparent);
+  box-shadow: var(--dsw-elevation-prominent, 0 16px 48px rgba(0,0,0,0.22)); }
+.pcp-gate-close { position: absolute; top: 12px; right: 12px; cursor: pointer; font: inherit; font-size: 14px; line-height: 1;
+  width: 30px; height: 30px; border-radius: 999px; display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent); color: var(--dsw-alias-label-secondary);
+  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-label-primary) 14%, transparent); }
+.pcp-gate-close:hover { color: var(--dsw-alias-label-primary); }
+.pcp-gate-heading { margin: 0 0 4px; font-size: 17px; font-weight: 650; color: var(--dsw-alias-label-primary); }
+.pcp-gate-path { margin: 0 0 14px; font-size: 12.5px; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
+.pcp-gate-choices { display: flex; gap: 14px; width: 100%; }
+.pcp-gate-choice { flex: 1; cursor: pointer; font: inherit; display: flex; flex-direction: column; gap: 6px; align-items: center;
+  padding: 22px 16px; border-radius: 12px; box-sizing: border-box; transition: background 120ms ease, border-color 120ms ease; }
+.pcp-gate-create { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-success-primary) 40%, transparent); color: var(--dsw-alias-state-success-primary); }
+.pcp-gate-create:hover { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 22%, transparent); }
+.pcp-gate-decline { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 40%, transparent); color: var(--dsw-alias-state-error-primary); }
+.pcp-gate-decline:hover { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 22%, transparent); }
+.pcp-gate-choice:disabled { cursor: default; opacity: 0.55; }
+.pcp-gate-choice-title { font-size: 14.5px; font-weight: 650; }
+.pcp-gate-choice-hint { font-size: 11.5px; color: var(--dsw-alias-label-secondary); }
+`
+
+    /** Minimal snapshot store for the gate overlay request (workbench pattern). */
+    function createGateStore() {
+      let current = null
+      const listeners = new Set()
+      const publish = () => { for (const listener of [...listeners]) listener() }
+      return {
+        source: {
+          getSnapshot: () => current,
+          subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener) } },
+          dismiss() { current = null; publish() },
+        },
+        set(next) { current = next; publish() },
+      }
+    }
+
+    /**
+     * Conversation-anchored gate overlay (ported from github-workbench):
+     * anchors over the chat area only, never the composer or sidebars, and
+     * tracks the region through window resizes. Frosted-glass card with two
+     * choices: create (whitelist) or decline (blacklist).
+     */
+    function GateOverlay({ gateSource, actions, t }) {
+      const [gate, setGate] = useState(gateSource.getSnapshot())
+      const [region, setRegion] = useState(null)
+      useEffect(() => gateSource.subscribe(() => setGate(gateSource.getSnapshot())), [gateSource])
+      useEffect(() => {
+        if (gate === null) return
+        const measure = () => {
+          let anchor = document.querySelector("[data-slot='conversation.session']")
+          if (anchor === null || anchor.getBoundingClientRect().height < 80) {
+            anchor = document.querySelector('[data-conversation-content]')
+          }
+          if (anchor === null) { setRegion(null); return }
+          const box = anchor.getBoundingClientRect()
+          if (box.width < 80 || box.height < 80) { setRegion(null); return }
+          setRegion({ top: box.top, left: box.left, width: box.width, height: box.height })
+        }
+        measure()
+        window.addEventListener('resize', measure)
+        const anchor = document.querySelector('[data-conversation-content]')
+        if (anchor !== null) {
+          const observer = new ResizeObserver(measure)
+          observer.observe(anchor)
+          return () => { window.removeEventListener('resize', measure); observer.disconnect() }
+        }
+        return () => { window.removeEventListener('resize', measure) }
+      }, [gate !== null])
+      const styleEl = h('style', { 'data-plugin-css': PKG + '-gate', dangerouslySetInnerHTML: { __html: GATE_CSS } })
+      if (gate === null || region === null) return styleEl
+
+      return h(React.Fragment, null, styleEl, h('div', {
+        className: 'pcp-gate-overlay',
+        role: 'dialog', 'aria-modal': false, 'aria-label': t('gateTitle'),
+        style: { top: region.top, left: region.left, width: region.width, height: region.height },
+      },
+        h('div', { className: 'pcp-gate-card' },
+          h('button', {
+            className: 'pcp-gate-close', title: t('gateClose'), 'aria-label': t('gateClose'),
+            onClick: () => actions.close(gate),
+          }, "✕"),
+          h('h2', { className: 'pcp-gate-heading' }, t('gateTitle')),
+          h('p', { className: 'pcp-gate-path' }, t('gateBody', { path: gate.path })),
+          gate.error != null ? h('p', { className: 'pcp-gate-path', style: { color: 'var(--dsw-alias-state-error-primary)' } }, gate.error) : null,
+          h('div', { className: 'pcp-gate-choices' },
+            h('button', {
+              className: 'pcp-gate-choice pcp-gate-create', disabled: gate.busy === true,
+              onClick: () => actions.accept(gate),
+            },
+              h('span', { className: 'pcp-gate-choice-title' }, t('gateAccept')),
+              h('span', { className: 'pcp-gate-choice-hint' }, t('gateAcceptHint')),
+            ),
+            h('button', {
+              className: 'pcp-gate-choice pcp-gate-decline', disabled: gate.busy === true,
+              onClick: () => actions.decline(gate),
+            },
+              h('span', { className: 'pcp-gate-choice-title' }, t('gateDecline')),
+              h('span', { className: 'pcp-gate-choice-hint' }, t('gateDeclineHint')),
+            ),
+          ),
+        ),
+      ))
+    }
+
     // ------------------------------------------------- Remote contribution
 
     const z = require('zod')
@@ -324,6 +454,12 @@ window.__ModuleLoader__.load({
         'projectCognitionPanel/panelData': method('projectCognitionPanel',
           'Read one read-only cognition panel snapshot for a project directory (volumes, drift, pending, database, verify).',
           [{ name: 'request', description: '{ project: absolute directory }.', source: 'json', codec: requestJson }]),
+        'projectCognitionPanel/sessionGate': method('projectCognitionPanel',
+          'Gate facts for one project directory: whitelist/blacklist coverage and index existence.',
+          [{ name: 'request', description: '{ project: absolute directory }.', source: 'json', codec: requestJson }]),
+        'projectCognitionPanel/gateDecision': method('projectCognitionPanel',
+          'Record the user\'s gate answer: accept whitelists the project, decline blacklists it (mutually exclusive lists).',
+          [{ name: 'request', description: '{ project: absolute directory, accept: boolean, remark?: string }.', source: 'json', codec: requestJson }]),
       },
     }
 
@@ -358,7 +494,11 @@ window.__ModuleLoader__.load({
         }
         return result.value
       }
-      const api = { panelData: request => call('panelData', request) }
+      const api = {
+        panelData: request => call('panelData', request),
+        sessionGate: request => call('sessionGate', request),
+        gateDecision: request => call('gateDecision', request),
+      }
 
       ctx.effect(() => ctx.slots.inject('main', () => ctx.slots.register({
         name: 'main', key: PANEL_ID, locale: NS,
@@ -379,6 +519,90 @@ window.__ModuleLoader__.load({
         },
       }, PanelPage)), 'project-cognition-panel: main page')
 
+      // ------------------------------------------------ gate overlay
+      // Conversation-start gate (ported from github-workbench): evaluate
+      // once per session at the user's first activity; unlisted projects
+      // raise the overlay question whose answer lands on the whitelist or
+      // the blacklist via the Host gateDecision method.
+      const gateStore = createGateStore()
+      const gateDismissed = new Set()
+      let gateBusy = false
+      const evaluateGate = async currentSession => {
+        const snapshot = ctx.get('workspaces')?.list?.getSnapshot()
+        const workspace = snapshot?.items?.find(item => item.sessionIds.includes(currentSession.id))
+        const path = workspace?.path ?? (typeof currentSession.cwd === 'string' && currentSession.cwd !== '' ? currentSession.cwd : undefined)
+        if (path === undefined || gateDismissed.has(path)) return
+        if (gateBusy) return
+        gateBusy = true
+        try {
+          const result = await api.sessionGate({ project: path })
+          if (result.allowed === true || result.declined === true || gateDismissed.has(path)) return
+          gateStore.set({ path, busy: false, hasIndex: result.hasIndex === true })
+        } catch {
+          // Gate is best-effort: a failed probe never blocks the conversation.
+        } finally {
+          gateBusy = false
+        }
+      }
+      const gateActions = {
+        close: gate => { gateDismissed.add(gate.path); gateStore.set(null) },
+        accept: async gate => {
+          gateStore.set({ ...gate, busy: true })
+          try {
+            await api.gateDecision({ project: gate.path, accept: true })
+            gateDismissed.add(gate.path)
+            gateStore.set(null)
+          } catch (error) {
+            gateStore.set({ ...gate, busy: false, error: error?.message ?? String(error) })
+          }
+        },
+        decline: async gate => {
+          gateStore.set({ ...gate, busy: true })
+          try {
+            await api.gateDecision({ project: gate.path, accept: false })
+            gateDismissed.add(gate.path)
+            gateStore.set(null)
+          } catch (error) {
+            gateStore.set({ ...gate, busy: false, error: error?.message ?? String(error) })
+          }
+        },
+      }
+      // The sessions list subscription is the activity sensor: the current
+      // main-view session's first message moves updatedAt or starts running;
+      // from then on the gate is evaluated exactly once for that session.
+      ctx.effect(() => {
+        let currentId
+        let baselineUpdatedAt = Number.NEGATIVE_INFINITY
+        let baselineRunning = false
+        let evaluated = false
+        const unsubscribe = ctx.get('sessions')?.list?.subscribe(() => {
+          const sessions = ctx.get('sessions')?.list?.getSnapshot()
+          if (sessions === undefined) return
+          const currentSession = Object.values(sessions.byId).find(row => (row.retainedBy?.mainView ?? 0) > 0)
+          if (currentSession === undefined) { currentId = undefined; return }
+          if (currentId !== currentSession.id) {
+            // Conversation switch: drop a visible prompt silently (no list
+            // write, not dismissed) and re-baseline for the new session.
+            gateStore.set(null)
+            currentId = currentSession.id
+            baselineUpdatedAt = currentSession.updatedAt
+            baselineRunning = currentSession.running === true
+            evaluated = false
+          }
+          if (evaluated) return
+          const firstMessage = currentSession.updatedAt > baselineUpdatedAt
+            || (currentSession.running === true && !baselineRunning)
+          if (!firstMessage) return
+          evaluated = true
+          void evaluateGate(currentSession)
+        })
+        return () => { unsubscribe?.() }
+      }, 'project-cognition-panel: gate evaluation')
+      ctx.effect(() => ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+        name: 'shell.overlay', id: 'project-cognition-panel.gate', locale: NS,
+        inject: () => ({ gateSource: gateStore.source, actions: gateActions, t }),
+      }, GateOverlay)), 'project-cognition-panel: gate overlay')
+
       ctx.effect(() => ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
         name: 'sidebar.panellist', id: PANEL_ID, order: 6, label: () => t('panel'), locale: NS,
       }, function PanelIcon() {
@@ -388,6 +612,6 @@ window.__ModuleLoader__.load({
       })), 'project-cognition-panel: sidebar entry')
     }
 
-    return { inject: ['remote', 'slots', 'locale', 'workspaces'], apply }
+    return { inject: ['remote', 'slots', 'locale', 'workspaces', 'sessions'], apply }
   },
 })

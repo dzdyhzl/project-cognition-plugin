@@ -1096,9 +1096,10 @@ export function apply(ctx, userConfig = {}) {
       }
       return {
         text: [
-          `VERDICT: unlisted. ${root} is neither whitelisted nor blacklisted — ask the user through the user-question overlay (ask_user_question) exactly once:`,
-          '"为这个项目维护认知索引（cognition）吗？" with options 创建 (accept) / 拒绝 (decline).',
-          'Then call cognition_gate again with user_response=accept (whitelist, create the index) or user_response=decline (blacklist, do nothing).',
+          `VERDICT: unlisted. ${root} is neither whitelisted nor blacklisted.`,
+          'The Web client raises the gate overlay (create/decline) automatically after the first message; the user\'s choice lands on the whitelist or blacklist.',
+          'Wait for the user\'s answer, then call cognition_gate again to observe the recorded verdict.',
+          'If no overlay appears (non-Web session), ask once via ask_user_question ("为这个项目维护认知索引吗？" / create or decline), then answer this gate with user_response=accept or decline yourself.',
         ].join('\n'),
       }
     },
