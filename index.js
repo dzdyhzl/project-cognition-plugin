@@ -38,6 +38,7 @@ const DEFAULT_CONFIG = Object.freeze({
   locale: 'zh-CN',
   maxOverviewEntries: 400,
   overviewChunkTokens: 7000,
+  refreshThreshold: 30,
   include: [],
   excludeDirs: [],
 })
@@ -60,6 +61,10 @@ function resolveConfig(config = {}) {
   if (config.overviewChunkTokens !== undefined) {
     if (!Number.isInteger(config.overviewChunkTokens) || config.overviewChunkTokens < 2000 || config.overviewChunkTokens > 30000) throw new Error('project-cognition: overviewChunkTokens must be an integer between 2000 and 30000')
     merged.overviewChunkTokens = config.overviewChunkTokens
+  }
+  if (config.refreshThreshold !== undefined) {
+    if (!Number.isInteger(config.refreshThreshold) || config.refreshThreshold < 1) throw new Error('project-cognition: refreshThreshold must be a positive integer')
+    merged.refreshThreshold = config.refreshThreshold
   }
   if (config.include !== undefined) {
     if (!Array.isArray(config.include)) throw new Error('project-cognition: include must be an array of strings')
@@ -243,6 +248,7 @@ export function apply(ctx, userConfig = {}) {
   const localeDefault = config.locale
   const maxOverviewEntries = config.maxOverviewEntries
   const chunkTokenBudget = config.overviewChunkTokens
+  const refreshThreshold = config.refreshThreshold
   const extraExtensions = config.include
   const extraExcludeDirs = new Set(config.excludeDirs ?? [])
 
@@ -407,6 +413,7 @@ export function apply(ctx, userConfig = {}) {
         lines.push(`## Pending authoring (${pending.length} files awaiting entries or updates)`)
         lines.push(pending.slice(0, 100).join('\n'))
         if (pending.length > 100) lines.push(`... and ${pending.length - 100} more; call cognition_scan for the full drift report`)
+        if (pending.length >= refreshThreshold) lines.push(`REFRESH SUGGESTED: ${pending.length} pending paths exceed the refresh threshold (${refreshThreshold}) — run cognition_scan to reconcile with the current tree before relying on this picture (AOCI-style refresh threshold).`)
       }
       const dbPending = state?.database?.pending ?? []
       if (dbPending.length > 0) {

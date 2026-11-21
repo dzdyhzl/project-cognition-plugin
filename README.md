@@ -55,6 +55,10 @@ lib/scanner.js[CG9]: F:职责 | R:code:lib/state.js,... | A:导出接口 | S:非
 3. 之后每个新会话开始时，AI 先调 `cognition_gate` 确认名单状态（未登记项目会弹对话框询问一次），再调 `cognition_overview` 获得项目全局认知。
 4. 完成开发后 AI 会自动 `cognition_scan` → `cognition_update_entries`，保持索引与代码对齐。
 
+## 测试
+
+`pnpm test`（即 `node --test test/`）：18 个测试覆盖格式解析、扫描器、模板（含 AGENTS.md 托管块幂等）、state、DDL 解析与全部工具的 mock-ctx 链路；gate 测试经 `PROJECT_COGNITION_REGISTRY` 环境变量指向临时注册表，不触碰真实 `~/.dsh`。
+
 ## 跨宿主集成（AGENTS.md）
 
 对标 AOCI-CODE 的受管规则块：`cognition_init` 传 `agents_md=true` 时，会在项目根的 `AGENTS.md` 追加一段以 `project-cognition:start/end` 定界的托管规则块（中文或英文随 locale），让 Codex、Claude Code、Cursor 等其他宿主的 Agent 也遵循同一索引工作流。块外内容绝不改动；再次 init 或 doctor 可检查块状态。
