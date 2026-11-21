@@ -23,7 +23,7 @@
 - **诊断**：`cognition_doctor` 一次性体检索引环境——分卷骨架、Meta 字典可解析、state.json 完整性（v1/v2、条目/文件哈希一致性、待办清单异常）、schema evidence 与声明一致性、漂移摘要、覆盖率、索引规模与分块预算；输出逐项 HEALTHY / WARN / FAIL 结论，索引行为异常或从 Git 恢复后可运行。
 - **只读 Web 面板**：左侧栏新增"项目认知索引"页：选一个已登记的工作区，即可查看代码/数据库条目数、漂移计数（missing/orphan/stale）、待写清单、数据库 evidence 状态与 verify 对齐结论，30 秒自动刷新可关。面板严格只读，所有写入仍通过会话中的 cognition_* 工具完成。
 - **白/黑名单门禁**：`cognition_gate` 在每次会话开始时把项目对照 `~/.dsh/project-cognition.json` 里的两份名单（白名单 allowed / 黑名单 declined，二者互斥）：黑名单项目不处理，也不建议建索引；白名单项目已有索引则动态维护（开发后 `cognition_scan` → `cognition_update_entries` / `cognition_remove_entries`），没有索引则立即创建；两表都未登记时，模型通过用户问答覆盖对话框询问一次"是否创建 cognition"，用户选创建→写入白名单并开始建索引，选拒绝→写入黑名单。`cognition_registry` 的 `list` 展示两份名单，`whitelist`/`unwhitelist`/`decline`/`allow` 分别维护白/黑名单。
-- **数据库认知（可选）**：`cognition_database_init` 导入一份 .sql DDL dump（mysqldump / pg_dump 输出，本地文件，零网络）作为 Schema Evidence，随后为每张表写表级 FRAS 条目；`cognition_database_scan` 检测表级漂移；`cognition_verify` 一次性重校验两个卷的全部条目。
+- **数据库认知（可选）**：`cognition_database_init` 导入一份 .sql DDL dump（mysqldump / pg_dump 输出，本地文件，零网络）作为 Schema Evidence，随后为每张表写表级 FRAS 条目；`cognition_database_scan` 检测表级漂移并报告 evidence 细节（CHECK 约束数、列注释数），提示撰写表级 FRAS 时引用这些非显而易见语义；`cognition_verify` 一次性重校验两个卷的全部条目。
 
 ## 索引文件
 

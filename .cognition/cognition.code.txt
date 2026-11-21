@@ -5,12 +5,12 @@ PLAN.md[SS7S]: F:设计决策记录：目标、已确认决策（简化复刻范
 README.md[SG6]: F:项目自述：原理、14 个工具表、快速开始、测试、跨宿主集成、面板（覆盖率/分块计划/下一步建议）与边界 | R:- | A:- | S:版本徽章与 package.json 同步维护
 client.js[EU7]: F:面板 Web 界面：工作区选择、统计卡、漂移/覆盖率徽章、chunk 计划行、nextActions 建议卡（clipboard 复制按钮）、待维护清单、数据库卷、验证结论、条目预览、gate 询问对话框 | R:code:panel.js | A:默认导出 client factory（id=@local/project-cognition） | S:NextActions 组件用 navigator.clipboard，失败静默降级为可选中文本；文案走 ctx.locale.bind {key} 占位符，zh/en 必须同步
 cordis.patch.yml[FG9T]: F:用户补丁层声明：把 project-cognition 插件与其面板服务插入当前运行配置，升级不丢。 | R:code:package.json | A:insert 两个 cordis 条目：project-cognition 与 project-cognition:panel | S:由 dsh bundle 机制加载（package.json 的 dsh.bundle.patch 指向此文件）；面板条目 id 带 :panel 后缀，指向 package.json exports 的 ./panel。
-index.js[AB9L]: F:注册全部 cognition_* 工具与系统提示段：overview（token 估算、覆盖率、token+条目双门控分块建议、refreshThreshold 刷新建议）、init（可选 AGENTS.md 托管块）、scan（覆盖率）、update/remove_entries（含 code 卷跨卷 database: 引用对照 evidence 校验）、search（forward/reverse/impact 传递闭包，跨卷 db 表→code 可用）、database_init/scan（报告 checks 计数）、verify（跨卷引用校验）、snapshot/evolution、doctor、gate、registry | R:code:lib/format.js,code:lib/scanner.js,code:lib/state.js,code:lib/templates.js,code:lib/ddl.js,code:lib/registry.js,code:test/plugin.test.js | A:apply(ctx, config) 注册 14 个工具 | S:overview 整卷交付门槛 = 条目数 ≤ maxOverviewEntries 且估算 token ≤ overviewChunkTokens；impact 的 R 匹配剥离前缀故天然跨卷
+index.js[AB9L]: F:注册全部 cognition_* 工具与系统提示段：overview（token+条目双门控分块、refreshThreshold）、init（AGENTS.md 托管块）、scan（覆盖率）、update/remove_entries（跨卷 database: 引用校验）、search（forward/reverse/impact 跨卷闭包）、database_init（checks/列注释计数）、database_scan（evidence 细节摘要）、verify（跨卷引用校验）、snapshot/evolution、doctor、gate、registry | R:code:lib/format.js,code:lib/scanner.js,code:lib/state.js,code:lib/templates.js,code:lib/ddl.js,code:lib/registry.js,code:test/plugin.test.js | A:apply(ctx, config) 注册 14 个工具 | S:database_scan 的 evidence detail 行引导模型在表级 FRAS 的 S/F 字段引用 CHECK 与列注释等非显而易见语义
 package.json[FG5]: F:bundle 清单：包名 @local/project-cognition、版本、scripts.test、导出映射、DSH client/patch 声明 | R:code:cordis.patch.yml,code:test/plugin.test.js | A:- | S:exports 同时暴露 index/panel/client/locale/icon 五个入口；dsh.client.inject 依赖会话界面插件
 panel.js[CG7]: F:只读面板 Host 服务：panelData 快照（卷摘要、漂移、覆盖率、token 规模、chunk 计划、nextActions 下一步建议、数据库 evidence、verify）、sessionGate 名单事实、gateDecision 写名单 | R:code:lib/format.js,code:lib/scanner.js,code:lib/state.js,code:lib/registry.js | A:panelData, sessionGate, gateDecision | S:nextActions 由快照事实确定性推导（待维护/漂移/违规数），无索引路径提前返回不带此字段；chunkPlan 与 overview 共用估算器；Typert Remote 直连
 
 ===docs/===
-DETAIL.md[SG6]: F:中文详细文档：功能清单、索引文件布局、使用建议与边界 | R:code:index.js | A:- | S:与 README 保持同步；含列注释采集、CHECK 约束、跨卷影响分析、token 预算门控、跨卷引用校验等说明
+DETAIL.md[SG6]: F:中文详细文档：功能清单、索引文件布局、使用建议与边界 | R:code:index.js | A:- | S:与 README 保持同步；含 database_scan evidence 细节、列注释采集、CHECK 约束、跨卷影响分析、token 预算门控等说明
 
 ===lib/===
 ddl.js[CG8]: F:DDL 解析为 Schema Evidence：CREATE TABLE 内联约束 + pg_dump 分离语句折叠（PK/UNIQUE/FOREIGN KEY/CHECK、CREATE [UNIQUE] INDEX），CHECK 解析为 checks 字段，列注释采集（MySQL 内联 COMMENT + PostgreSQL COMMENT ON COLUMN） | R:code:index.js,code:test/plugin.test.js | A:parseDdl(text, { sourceId, engine })；table.checks: { name?, expression }；columns[].comment | S:COMMENT ON 列名正则须容忍 schema 限定三段名（[^\s(]+\.[^\s(]+?\s+is）；parseColumnList 期望带括号子句；不匹配的列注释显式告警
@@ -25,4 +25,4 @@ en.json[SG4]: F:英文界面文案：插件元信息、14 个工具摘要、面�
 zh.json[SG4]: F:中文界面文案：插件元信息、14 个工具摘要、面板标签（含分块计划/下一步建议） | R:- | A:- | S:工具 summary 由 DSH 读取展示，改字段需同步 en.json
 
 ===test/===
-plugin.test.js[TG8]: F:回归测试套件（node:test，零依赖，24 例）：纯函数库 + 全部 cognition_* 工具链路 + 面板服务 + DDL 解析（分离约束/CHECK/列注释）+ 跨卷引用校验 + 跨卷 impact | R:code:index.js,code:panel.js,code:lib/ddl.js | A:npm test（node --test test/） | S:gate/registry 测试经 PROJECT_COGNITION_REGISTRY 隔离；列注释测试覆盖两种方言与不匹配告警
+plugin.test.js[TG8]: F:回归测试套件（node:test，零依赖，25 例）：纯函数库 + 全部 cognition_* 工具链路 + 面板服务 + DDL 解析 + 跨卷引用/impact + database_scan evidence 细节 | R:code:index.js,code:panel.js,code:lib/ddl.js | A:npm test（node --test test/） | S:gate/registry 测试经 PROJECT_COGNITION_REGISTRY 隔离；database_scan 断言 evidence detail 计数行

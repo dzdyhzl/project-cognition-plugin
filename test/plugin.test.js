@@ -547,3 +547,21 @@ test('ddl: column comments are captured from MySQL inline COMMENT and PostgreSQL
   assert.equal(pg.tables[0].columns.find(col => col.name === 'id').comment, undefined)
   assert.ok(pg.parseWarnings.some(w => w.includes('ghost has no matching parsed column')))
 })
+
+test('tools: database_scan reports checks and column comment counts from evidence', async () => {
+  const root = await makeProject()
+  const tools = await loadPlugin(root)
+  const exec = { agent: 'test' }
+  await tools.cognition_init.execute({}, exec)
+  const dump = join(root, 'dump.sql')
+  await writeFile(dump, [
+    'CREATE TABLE public.orders (id integer NOT NULL, total numeric);',
+    'ALTER TABLE public.orders ADD CONSTRAINT orders_total_check CHECK (total >= 0);',
+    "COMMENT ON COLUMN public.orders.total IS '订单总金额';",
+  ].join('\n'), 'utf8')
+  await tools.cognition_database_init.execute({ dump: 'dump.sql', engine: 'postgresql' }, exec)
+  const scan = await tools.cognition_database_scan.execute({}, exec)
+  assert.match(scan.text, /evidence detail: 1 CHECK constraint\(s\), 1 column comment\(s\)/)
+  assert.match(scan.text, /cite these in table FRAS/)
+  await rm(root, { recursive: true, force: true })
+})
