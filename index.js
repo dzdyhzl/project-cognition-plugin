@@ -369,8 +369,8 @@ export function apply(ctx, userConfig = {}) {
         } else {
           lines.push(`ALL_CHUNKS_DELIVERED: the whole index (${flat.length} entries) has been delivered. You may start task work.`)
         }
-      } else if (entryCount > maxOverviewEntries) {
-        lines.push(`The code volume holds ${entryCount} entries (over the full-delivery budget ${maxOverviewEntries}).`)
+      } else if (entryCount > maxOverviewEntries || indexTokens > chunkTokenBudget) {
+        lines.push(`The code volume holds ${entryCount} entries (~${indexTokens} tokens; over the ${entryCount > maxOverviewEntries ? `entry budget ${maxOverviewEntries}` : `token budget ${chunkTokenBudget}`}).`)
         lines.push('Call cognition_overview again with chunk=1 (optionally chunk_entries) to receive the whole index in chunks, or use cognition_search to narrow by tag or keyword.')
       } else {
         lines.push('## Root manifest')
@@ -1037,7 +1037,7 @@ export function apply(ctx, userConfig = {}) {
       await saveState(paths.state, state)
       const lines = [
         `# cognition_database_init`,
-        `source: ${args.source_id} (${evidence.engine}) | tables parsed: ${evidence.tables.length} | dump sha256: ${evidence.dumpSha256.slice(0, 12)}…`,
+        `source: ${args.source_id} (${evidence.engine}) | tables parsed: ${evidence.tables.length} | checks: ${evidence.tables.reduce((sum, table) => sum + (table.checks?.length ?? 0), 0)} | dump sha256: ${evidence.dumpSha256.slice(0, 12)}…`,
         `evidence ${previousSource === undefined ? 'imported' : evidenceChanged ? 'changed — all tables marked pending re-check' : 'unchanged — pending list only gained tables without entries'}`,
         ...(metaUpgraded ? ['Meta upgraded: appended the #[Tag dictionary: database] section.'] : []),
         ...(evidence.parseWarnings.length > 0 ? [`parse warnings: ${evidence.parseWarnings.join('; ')}`] : []),

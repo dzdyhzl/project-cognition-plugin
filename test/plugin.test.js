@@ -508,3 +508,24 @@ test('tools: code entries with database: R references validate against schema ev
   assert.match(verify.text, /aligned=true/)
   await rm(root, { recursive: true, force: true })
 })
+
+test('tools: impact crosses volumes — database table reaches code entries along R edges', async () => {
+  const root = await makeProject({
+    'src/repo.js': 'x\n',
+    'src/service.js': "import { repo } from './repo.js'\n",
+  })
+  const tools = await loadPlugin(root)
+  const exec = { agent: 'test' }
+  await tools.cognition_init.execute({}, exec)
+  await writeFile(join(root, 'dump.sql'), 'CREATE TABLE public.orders (id integer NOT NULL);\n', 'utf8')
+  await tools.cognition_database_init.execute({ dump: 'dump.sql', engine: 'postgresql' }, exec)
+  await tools.cognition_update_entries.execute({ entries: [
+    { path: 'src/repo.js', tags: 'PG6', f: 'repo', r: 'database:public.orders', a: 'repo', s: '-' },
+    { path: 'src/service.js', tags: 'AB7', f: 'svc', r: 'code:src/repo.js', a: 'svc', s: '-' },
+  ] }, exec)
+  const imp = await tools.cognition_search.execute({ relations: 'impact', volume: 'code', path: 'public.orders' }, exec)
+  assert.match(imp.text, /derived=true/)
+  assert.match(imp.text, /src\/repo\.js/)
+  assert.match(imp.text, /src\/service\.js/)
+  await rm(root, { recursive: true, force: true })
+})
