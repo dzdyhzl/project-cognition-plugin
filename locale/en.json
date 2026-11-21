@@ -1,0 +1,21 @@
+{
+  "meta": {
+    "title": "Project cognition index",
+    "description": "Maintains a plain-text, Git-versioned cognition map of each project (.cognition/ volumes with FRAS entries), so a session reads one index instead of re-discovering the codebase. Simplified re-implementation of the AOCI-CODE method.",
+    "detail": "docs/DETAIL.md"
+  },
+  "tools": {
+    "cognition_overview": {
+      "summary": "Load the whole cognition map before working on a project; chunked delivery for large indexes, includes the database volume."
+    },
+    "cognition_init": "Create the .cognition/ volume skeleton.",
+    "cognition_scan": "Report missing/orphan/stale drift and a batched authoring plan.",
+    "cognition_update_entries": "Validate and write FRAS entries (code/database volumes).",
+    "cognition_remove_entries": "Drop entries whose files/tables were deleted.",
+    "cognition_search": "Filter entries by tag, path, keyword, or project forward/reverse R relations.",
+    "cognition_database_init": "Import a .sql DDL dump as Schema Evidence and enable the database volume.",
+    "cognition_database_scan": "Detect table-level drift (missing/orphan entries).",
+    "cognition_verify": "Re-validate every volume's entries; returns the alignment verdict."
+  },
+  "panel": "Read-only panel: inspect index status, drift, and the verify verdict"
+}

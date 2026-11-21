@@ -1,0 +1,6 @@
+- insert:
+    - id: project-cognition
+      name: '@local/project-cognition'
+      config: {}
+    - id: project-cognition:panel
+      name: '@local/project-cognition/panel'
