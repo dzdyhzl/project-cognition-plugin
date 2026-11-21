@@ -10,6 +10,7 @@
 - **增量维护**：开发完成后调用 `cognition_scan` 检测漂移（Missing 已删文件 / Orphan 新文件 / Stale 内容已变），用 `cognition_update_entries` / `cognition_remove_entries` 补齐，索引回到与代码对齐的状态。
 - **影响分析**：`cognition_search` 传 `relations=impact` + `path=目标文件`，沿模型撰写的正式 R 关系反向遍历传递闭包，逐层输出"改这个文件可能波及哪些条目"（derived=true，只走显式 R 边，不自动推断）。
 - **覆盖率与规模**：overview 与 scan 报告索引覆盖了多少受管代码（文件数/行数百分比），并估算索引的 token 规模；大索引的 overview 分块按估算 token 预算（默认 7000，配置 `overviewChunkTokens`）切分，而不是固定条数。
+- **面板分块计划**：面板与 overview 使用同一个 token 估算器计算当前索引需要的分块交付数（默认 7000 token/块预算），展示整卷一次交付还是分几块。
 - **回归测试**：`test/plugin.test.js`（node:test，零依赖）覆盖纯函数库（format/scanner/state/ddl/templates）与全部 cognition_* 工具的 mock-ctx 端到端链路；注册表经环境变量隔离，可安全重复运行。
 - **刷新阈值**：`overview` 在待办条数达到配置阈值（`refreshThreshold`，默认 30）时提示先 `cognition_scan` 再依赖索引图景，对应 AOCI-CODE 的语义刷新阈值。
 - **跨宿主规则块**：`cognition_init` 传 `agents_md=true` 向项目根 `AGENTS.md` 写入定界托管块（`<!-- project-cognition:start/end -->`），块内是工作流规则（gate→overview→scan→update/verify→impact），幂等可更新；块外用户内容零改动。对应 AOCI-CODE `init` 写受管 AGENTS.md 规则块的做法，简化为 opt-in 单宿主无关形态。

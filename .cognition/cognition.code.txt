@@ -2,15 +2,15 @@
 
 ===./===
 PLAN.md[SS7S]: F:设计决策记录：目标、已确认决策（简化复刻范围、触发方式、索引存放）、工具表、实施步骤与验收标准。 | R:- | A:PLAN.md（初始设计文档） | S:记录的是 v1 设计时点：未含后来加入的 Web 面板、cognition_registry 与数据库认知；与现状冲突时以 docs/DETAIL.md 和源码为准。
-README.md[SG6]: F:项目自述：原理、14 个工具表、快速开始、测试、跨宿主集成、面板与边界 | R:- | A:- | S:版本徽章与 package.json 同步维护
-client.js[EU7]: F:面板 Web 界面：工作区选择、统计卡、漂移/覆盖率徽章、待维护清单、数据库卷、验证结论、条目预览，以及未登记项目的建索引询问对话框 | R:code:panel.js | A:默认导出 client factory（id=@local/project-cognition） | S:经 ModuleLoader 懒加载；文案走 ctx.locale.bind，zh/en 双语必须同步
+README.md[SG6]: F:项目自述：原理、14 个工具表、快速开始、测试、跨宿主集成、面板（含覆盖率/分块计划）与边界 | R:- | A:- | S:版本徽章与 package.json 同步维护
+client.js[EU7]: F:面板 Web 界面：工作区选择、统计卡、漂移/覆盖率徽章、chunk 计划行、待维护清单、数据库卷、验证结论、条目预览，以及未登记项目的建索引询问对话框 | R:code:panel.js | A:默认导出 client factory（id=@local/project-cognition） | S:文案走 ctx.locale.bind 的 {key} 占位符约定，zh/en 双语必须同步；经 ModuleLoader 懒加载
 cordis.patch.yml[FG9T]: F:用户补丁层声明：把 project-cognition 插件与其面板服务插入当前运行配置，升级不丢。 | R:code:package.json | A:insert 两个 cordis 条目：project-cognition 与 project-cognition:panel | S:由 dsh bundle 机制加载（package.json 的 dsh.bundle.patch 指向此文件）；面板条目 id 带 :panel 后缀，指向 package.json exports 的 ./panel。
 index.js[AB9L]: F:注册全部 cognition_* 工具与系统提示段：overview（token 估算、覆盖率、token 预算分块、refreshThreshold 刷新建议）、init（可选 AGENTS.md 托管块）、scan（覆盖率）、update/remove_entries、search（forward/reverse/impact 传递闭包）、database_init/scan、verify、snapshot/evolution、doctor（含 AGENTS.md 块检查）、gate（轻量漂移摘要）、registry | R:code:lib/format.js,code:lib/scanner.js,code:lib/state.js,code:lib/templates.js,code:lib/ddl.js,code:lib/registry.js,code:test/plugin.test.js | A:apply(ctx, config) 注册 14 个工具；配置含 maxFileBytes/locale/maxOverviewEntries/overviewChunkTokens/refreshThreshold/include/excludeDirs | S:snapshot/evolution 不落盘到项目内；impact 沿正式 R 边反向 BFS 深度限 10；AGENTS.md 块外内容零改动
 package.json[FG5]: F:bundle 清单：包名 @local/project-cognition、版本、scripts.test、导出映射、DSH client/patch 声明 | R:code:cordis.patch.yml,code:test/plugin.test.js | A:- | S:exports 同时暴露 index/panel/client/locale/icon 五个入口；dsh.client.inject 依赖会话界面插件
-panel.js[CG7]: F:只读面板 Host 服务：panelData 快照（卷摘要、漂移、覆盖率、token 规模、数据库 evidence、verify）、sessionGate 名单事实、gateDecision 写名单 | R:code:lib/format.js,code:lib/scanner.js,code:lib/state.js,code:lib/registry.js | A:panelData, sessionGate, gateDecision | S:经 Typert Remote 描述符直连调用，失败按 isDSHRemoteError 结构判别；面板严格只读
+panel.js[CG7]: F:只读面板 Host 服务：panelData 快照（卷摘要、漂移、覆盖率、token 规模、chunk 计划、数据库 evidence、verify）、sessionGate 名单事实、gateDecision 写名单 | R:code:lib/format.js,code:lib/scanner.js,code:lib/state.js,code:lib/registry.js | A:panelData, sessionGate, gateDecision | S:chunkPlan 用与 overview 相同的估算器（7000 token/块默认预算）；漂移与覆盖率共用一次文件遍历；经 Typert Remote 直连，失败按 isDSHRemoteError 结构判别
 
 ===docs/===
-DETAIL.md[SG6]: F:中文详细文档：功能清单、索引文件布局、使用建议与边界 | R:code:index.js | A:- | S:与 README 保持同步；含回归测试、刷新阈值、跨宿主规则块、影响分析、快照演化说明
+DETAIL.md[SG6]: F:中文详细文档：功能清单、索引文件布局、使用建议与边界 | R:code:index.js | A:- | S:与 README 保持同步；含面板分块计划、回归测试、刷新阈值、跨宿主规则块、影响分析、快照演化说明
 
 ===lib/===
 ddl.js[KZ7M]: F:DDL 解析器：把 mysqldump/pg_dump/手写 .sql 文本解析为结构化 Schema Evidence（表、列、PK/FK/唯一键/索引），并显式报告无法解析的内容。 | R:- | A:parseDdl(text, { sourceId, engine }) | S:只覆盖常见方言表面（反引号/双引号标识符、MySQL COMMENT/ENGINE、PostgreSQL 类型、常见约束）；解析失败进入 parseWarnings 而非静默丢弃。
@@ -21,8 +21,8 @@ state.js[PD8S]: F:state.json 机器状态：受管文件哈希、条目哈希、
 templates.js[CG7]: F:分卷骨架与 AGENTS.md 托管块模板：zh/en 标签字典、Root/Meta/Code/Database 卷文本、COGNITION_GITIGNORE、agentsBlock/upsertAgentsBlock/hasAgentsBlock | R:code:index.js | A:volumeTemplates, agentsBlock, upsertAgentsBlock, hasAgentsBlock, AGENTS_MARKERS, COGNITION_GITIGNORE | S:托管块用 project-cognition:start/end 前缀定界（写入行带注释后缀），end 用 lastIndexOf 塌缩重复块；块外用户内容零改动
 
 ===locale/===
-en.json[SG4]: F:英文界面文案：插件元信息、14 个工具摘要、面板标签 | R:- | A:- | S:工具 summary 由 DSH 读取展示，改字段需同步 zh.json
-zh.json[SG4]: F:中文界面文案：插件元信息、14 个工具摘要、面板标签 | R:- | A:- | S:工具 summary 由 DSH 读取展示，改字段需同步 en.json
+en.json[SG4]: F:英文界面文案：插件元信息、14 个工具摘要、面板标签（含 chunk plan） | R:- | A:- | S:工具 summary 由 DSH 读取展示，改字段需同步 zh.json
+zh.json[SG4]: F:中文界面文案：插件元信息、14 个工具摘要、面板标签（含分块计划） | R:- | A:- | S:工具 summary 由 DSH 读取展示，改字段需同步 en.json
 
 ===test/===
 plugin.test.js[TG8]: F:回归测试套件（node:test，零依赖）：format/scanner/state/ddl/templates 纯函数 + 全部 cognition_* 工具的 mock-ctx 端到端链路（init→scan→update→verify→search/relations/impact→snapshot/evolution→doctor→gate→AGENTS.md→overview） | R:code:index.js,code:lib/ddl.js | A:npm test（node --test test/） | S:gate/registry 测试经 PROJECT_COGNITION_REGISTRY 指向临时注册表，不写真实 ~/.dsh；每个测试用独立临时项目树并自清理

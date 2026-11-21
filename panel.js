@@ -221,6 +221,38 @@ export class ProjectCognitionPanelService extends PanelServiceBase {
       verify.error = error.message
     }
 
+    // Overview chunk plan (AOCI panel metric, simplified): how many
+    // chunked deliveries the current index needs at the default 7000-token
+    // budget, computed with the same estimator cognition_overview uses.
+    let chunkPlan = null
+    if (codeRaw !== null) {
+      const parsedPlan = fmt.parseCodeVolume(codeRaw)
+      const flat = []
+      for (const section of parsedPlan.sections) {
+        for (const entry of section.entries) {
+          const fullPath = `${section.dir === '.' ? '' : `${section.dir}/`}${entry.basename}`
+          flat.push(fmt.serializeEntry({ path: fullPath, tags: entry.tags, f: entry.f, r: entry.r, a: entry.a, s: entry.s }))
+        }
+      }
+      const budget = 7000
+      const fixedOverhead = fmt.estimateTokens(rootText) + (metaText ? fmt.estimateTokens(metaText) : 0) + 40
+      const entryTokens = flat.map(line => fmt.estimateTokens(line) + 1)
+      let chunks = 0
+      let start = 0
+      while (start < flat.length) {
+        const limit = budget - (start === 0 ? fixedOverhead : 10)
+        let end = start
+        let used = 0
+        while (end < flat.length && (end === start || used + entryTokens[end] <= limit)) {
+          used += entryTokens[end]
+          end++
+        }
+        chunks++
+        start = end
+      }
+      chunkPlan = { entries: flat.length, chunks, fullDelivery: chunks <= 1, budget }
+    }
+
     return {
       project: header['Project'] ?? basename(root),
       root,
@@ -265,6 +297,7 @@ export class ProjectCognitionPanelService extends PanelServiceBase {
         missingEntries: coverage.missingEntries,
       },
       indexTokens: fmt.estimateTokens(rootText) + (metaText ? fmt.estimateTokens(metaText) : 0) + (codeRaw ? fmt.estimateTokens(codeRaw) : 0),
+      chunkPlan,
       updatedAt: new Date().toISOString(),
     }
   }

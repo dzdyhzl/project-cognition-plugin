@@ -20,5 +20,5 @@
     "cognition_snapshot": "输出当前认知状态的确定性只读 JSON 观察（条目+哈希+覆盖率+token 规模）；自行保存后可传给 cognition_evolution 对比。",
     "cognition_evolution": "把已保存的 cognition_snapshot JSON 与当前状态对比：新增/删除/变更条目、覆盖率与 token 变化、待办差值。只读，derived=true。"
   },
-  "panel": "只读面板：查看项目索引状态、漂移与验证结论"
+  "panel": "只读面板：查看项目索引状态、漂移、覆盖率、分块计划与验证结论"
 }
