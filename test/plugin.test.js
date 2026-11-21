@@ -459,3 +459,24 @@ test('ddl: pg_dump separate constraints and CREATE INDEX fold into evidence', as
   assert.deepEqual(mo.indexes, [['user_id']])
   assert.deepEqual(mo.uniques, [['email']])
 })
+
+test('ddl: CHECK constraints are captured inline and as separate ALTER statements', async () => {
+  const ddl = await mod('lib/ddl.js')
+  // inline (mysql style): named + unnamed
+  const inline = ddl.parseDdl('CREATE TABLE t (id INT, age INT, CONSTRAINT age_pos CHECK (age >= 0), CHECK (id > 0));', { engine: 'mysql' })
+  assert.deepEqual(inline.tables[0].checks, [
+    { name: 'age_pos', expression: 'age >= 0' },
+    { name: undefined, expression: 'id > 0' },
+  ])
+  // pg_dump style: named constraint + bare CHECK via ALTER TABLE
+  const pg = ddl.parseDdl([
+    'CREATE TABLE public.orders (id integer, total numeric);',
+    'ALTER TABLE public.orders ADD CONSTRAINT orders_total_check CHECK (total >= 0);',
+    'ALTER TABLE public.orders ADD CHECK (id <> total);',
+  ].join('\n'), { engine: 'postgresql' })
+  assert.deepEqual(pg.tables[0].checks, [
+    { name: 'orders_total_check', expression: 'total >= 0' },
+    { name: undefined, expression: 'id <> total' },
+  ])
+  assert.equal(pg.parseWarnings.length, 0)
+})
