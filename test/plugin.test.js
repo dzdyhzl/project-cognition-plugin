@@ -480,3 +480,31 @@ test('ddl: CHECK constraints are captured inline and as separate ALTER statement
   ])
   assert.equal(pg.parseWarnings.length, 0)
 })
+
+test('tools: code entries with database: R references validate against schema evidence', async () => {
+  const ddl = await mod('lib/ddl.js')
+  const root = await makeProject({ 'src/a.js': 'x\n' })
+  const tools = await loadPlugin(root)
+  const exec = { agent: 'test' }
+  await tools.cognition_init.execute({}, exec)
+  // declare a source with one table
+  const dump = join(root, 'dump.sql')
+  await writeFile(dump, 'CREATE TABLE public.orders (id integer NOT NULL);\n', 'utf8')
+  const dbInit = await tools.cognition_database_init.execute({ dump: 'dump.sql', engine: 'postgresql' }, exec)
+  assert.match(dbInit.text, /tables parsed: 1/)
+  // a code entry referencing an UNDECLARED table is rejected
+  const bad = await tools.cognition_update_entries.execute({ entries: [
+    { path: 'src/a.js', tags: 'CG5', f: 'a', r: 'database:public.ghost', a: '-', s: '-' },
+  ] }, exec)
+  assert.match(bad.text, /REJECTED src\/a\.js/)
+  assert.match(bad.text, /does not exist in the schema evidence/)
+  // referencing the declared table is accepted
+  const good = await tools.cognition_update_entries.execute({ entries: [
+    { path: 'src/a.js', tags: 'CG5', f: 'a', r: 'database:public.orders', a: '-', s: '-' },
+  ] }, exec)
+  assert.match(good.text, /accepted: 1 \| rejected: 0/)
+  // verify stays aligned
+  const verify = await tools.cognition_verify.execute({}, exec)
+  assert.match(verify.text, /aligned=true/)
+  await rm(root, { recursive: true, force: true })
+})

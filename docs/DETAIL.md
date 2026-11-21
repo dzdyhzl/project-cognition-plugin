@@ -10,6 +10,7 @@
 - **增量维护**：开发完成后调用 `cognition_scan` 检测漂移（Missing 已删文件 / Orphan 新文件 / Stale 内容已变），用 `cognition_update_entries` / `cognition_remove_entries` 补齐，索引回到与代码对齐的状态。
 - **影响分析**：`cognition_search` 传 `relations=impact` + `path=目标文件`，沿模型撰写的正式 R 关系反向遍历传递闭包，逐层输出"改这个文件可能波及哪些条目"（derived=true，只走显式 R 边，不自动推断）。
 - **覆盖率与规模**：overview 与 scan 报告索引覆盖了多少受管代码（文件数/行数百分比），并估算索引的 token 规模；大索引的 overview 分块按估算 token 预算（默认 7000，配置 `overviewChunkTokens`）切分，而不是固定条数。
+- **跨卷引用校验**：code 条目的 R 可以写 `database:schema.table`（代码↔数据库强关系）；update_entries 与 verify 会把这类引用对照已导入的 Schema Evidence 验证，指向未声明表的引用被拒绝或计为违规；项目未声明数据库源时不启用此检查。
 - **DDL 解析增强**：`cognition_database_init` 的解析器除 CREATE TABLE 内联约束外，还折叠 pg_dump 输出的分离语句——ALTER TABLE x ADD CONSTRAINT（PRIMARY KEY / UNIQUE / FOREIGN KEY ... REFERENCES）、MySQL 的 ALTER TABLE ADD PRIMARY KEY/KEY/UNIQUE，以及 CREATE [UNIQUE] INDEX ... ON x（USING btree 兼容）；CHECK 约束（内联或 ALTER 分离、具名/匿名）解析为 evidence 的 checks 字段（{ name?, expression }），供表级 FRAS 的 S 字段引用；表引用支持裸名、schema 限定名与引号形式。
 - **下一步建议**：面板按快照事实（待维护数、漂移数、校验违规）确定性推导现在该输入给 AI 的指令，一键复制；索引已对齐时提示正常开发即可。对应 AOCI 面板的“推荐输入”。
 - **面板分块计划**：面板与 overview 使用同一个 token 估算器计算当前索引需要的分块交付数（默认 7000 token/块预算），展示整卷一次交付还是分几块。

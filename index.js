@@ -613,7 +613,12 @@ export function apply(ctx, userConfig = {}) {
           ? `No Database volume at ${paths.database}. Call cognition_database_init first to declare a source and import a schema dump.`
           : `Code volume missing at ${paths.code}. Call cognition_init first.` }
       }
-      const evidence = isDatabase ? await loadPrimaryEvidence(root, state) : null
+      // Code entries may carry cross-volume database: R references; load the
+      // evidence for them too (null when no source is declared, which disables
+      // the check rather than failing unrelated entries).
+      const evidence = isDatabase || Object.keys(state.database?.sources ?? {}).length > 0
+        ? await loadPrimaryEvidence(root, state)
+        : null
       if (isDatabase && evidence === null) {
         return { text: 'No schema evidence found. Call cognition_database_init with a .sql DDL dump before authoring database entries.' }
       }
@@ -672,6 +677,8 @@ export function apply(ctx, userConfig = {}) {
           // The entry's own path must exist; code: R references are resolved
           // per-reference against the real project tree.
           fileExists: (candidate) => candidate === selfPath ? entryExists.get(selfPath) : true,
+          // database: R references validate against accepted schema evidence.
+          tableExists: evidence !== null ? evidenceTableLookup(evidence) : undefined,
         })
         if (errors.length > 0) {
           rejected.push({ path: posixPath, errors })
@@ -1143,7 +1150,9 @@ export function apply(ctx, userConfig = {}) {
               dictionary,
               quota: rules.quota,
               fileExists: volumeName === 'code' ? (ref) => filesCache.has(ref) : undefined,
-              tableExists: volumeName === 'database' ? evidenceTableLookup(evidence) : undefined,
+              // Cross-volume R references: code entries may point at database:
+              // tables, validated against the accepted schema evidence.
+              tableExists: evidence !== null ? evidenceTableLookup(evidence) : undefined,
             })
             for (const error of errors) violations.push(`${volumeName}: ${fullPath}: ${error}`)
           }
