@@ -13,7 +13,9 @@
     "cognition_search": "按标签、路径、关键词检索，或沿 R 关系做正/反向依赖投影。",
     "cognition_database_init": "导入 .sql DDL dump 为 Schema Evidence 并启用数据库卷。",
     "cognition_database_scan": "检测表级漂移（缺条目/孤儿条目）。",
-    "cognition_verify": "重校验全部卷的条目，返回对齐结论或违规清单。"
+    "cognition_verify": "重校验全部卷的条目，返回对齐结论或违规清单。",
+    "cognition_gate": "每次会话开始的门禁：按白/黑名单判定黑名单（不处理）/白名单（建索引或动态维护）/未登记（弹覆盖对话框询问，用户答复后写入对应名单）。",
+    "cognition_registry": "维护项目名单注册表（~/.dsh/project-cognition.json）：action=list 查看黑白名单，decline 加黑名单，allow 解除黑名单，whitelist 加白名单，unwhitelist 移出白名单。"
   },
   "panel": "只读面板：查看项目索引状态、漂移与验证结论"
 }

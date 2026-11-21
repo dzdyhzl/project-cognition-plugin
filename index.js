@@ -67,15 +67,16 @@ function resolveConfig(config = {}) {
 }
 
 const PROMPT_TEXT = [
-  'Project cognition index: when working inside a project (not this harness checkout),',
-  'call cognition_overview once before the first edits to load the project\'s plain-text',
-  'cognition map (.cognition/ volumes: Root/Meta/Code with FRAS entries). If no index',
-  'exists yet, follow its guided init-and-build workflow, but do not propose building',
-  'one when the project is on the declined list (cognition_overview reports this);',
-  'after finishing development,',
-  'run cognition_scan and then cognition_update_entries / cognition_remove_entries so',
-  'the index stays aligned with the code. Write entry semantics from real source code;',
-  'the tools validate structure, tags, and quotas only.',
+  'Project cognition gate: at the start of every conversation (first turn working in a',
+  'project, before other work), call cognition_gate once for the current project. It checks',
+  'the per-machine whitelist/blacklist registry: a blacklisted project gets no cognition',
+  'handling; a whitelisted one gets guided index creation or dynamic maintenance (after',
+  'development, cognition_scan then cognition_update_entries / cognition_remove_entries so',
+  'the index stays aligned with the code); an unlisted project requires asking the user',
+  'through the user-question overlay, then answering the gate with user_response=accept',
+  '(create the index and record the whitelist) or decline (record the blacklist). Track',
+  'multi-step index work with the task planning tools. Write entry semantics from real',
+  'source code; the tools validate structure, tags, and quotas only.',
 ].join(' ')
 
 const fmt = format
@@ -255,32 +256,17 @@ export function apply(ctx, userConfig = {}) {
       const root = await resolveProjectRoot(ctx, exec.agent, args.project)
       const paths = cognitionPaths(root)
       if (!(await fileExists(paths.root))) {
-        const declined = registry.declinedFor(root)
-        if (declined !== null) {
-          // The user declined index creation for this project; do not push the
-          // guided workflow again (workbench gate semantics).
-          const when = typeof declined.declinedAt === 'string' ? ` (recorded ${declined.declinedAt.slice(0, 10)})` : ''
-          return {
-            text: [
-              `No cognition index exists for ${root}, and this project is on the declined list${when}:`,
-              `the user chose not to maintain a cognition index here, so none is suggested.${declined.remark ? ` Remark: ${declined.remark}` : ''}`,
-              'If the user now wants an index, call cognition_registry with action="allow" to lift the record, then proceed with cognition_init.',
-            ].join('\n'),
-          }
-        }
+        // Route through the registry gate: it owns the whitelist/blacklist
+        // decision and the one-time user question, so this branch stays thin.
         return {
           text: [
-            `No cognition index exists for ${root}.`,
-            'To build one: 1) call cognition_init to create the volume skeleton;',
-            '2) call cognition_scan to list managed files in batches;',
-            '3) read the files of one batch and call cognition_update_entries with one FRAS entry per file;',
-            '4) repeat until the pending list is empty, then call cognition_overview to confirm.',
-            'If the user declines to build an index, record it with cognition_registry (action="decline") so later sessions stop suggesting one.',
-            'Entry line format (also in cognition.meta.txt): <basename>[<tags>]: F:<responsibility> | R:<code:rel-paths or -> | A:<public API or -> | S:<non-obvious constraint>.',
-            'Tags are Layer+Module+Importance(+Scale) codes from the Meta dictionary, e.g. CG9 or PA7M.',
+            `No cognition index exists for ${root}, and this session has not answered the registry gate yet.`,
+            'Call cognition_gate first: it reports blacklisted (do nothing), whitelisted (create the index now),',
+            'or unlisted (ask the user through the user-question overlay, then answer the gate with user_response).',
           ].join('\n'),
         }
       }
+
       const rootText = await readFile(paths.root, 'utf8')
       const metaText = await readFile(paths.meta, 'utf8')
       let codeText = ''
@@ -1026,14 +1012,107 @@ export function apply(ctx, userConfig = {}) {
     presentCall: (args) => ({ card: 'generic', title: 'Verify cognition index', kind: 'read' }),
   })
 
-  // ---------------------------------------------------------------- registry
+  // ---------------------------------------------------------------- gate
   tool(ctx, {
-    name: 'cognition_registry',
-    description: 'Maintain the persistent project registry (~/.dsh/project-cognition.json): the list of projects where the user declined cognition-index creation, so later sessions stop suggesting an index there. action="decline" records the project (deduplicated, with an optional remark), action="allow" lifts the record, action="list" shows all declined projects. Mirrors the github-workbench declined-workspace store.',
+    name: 'cognition_gate',
+    description: 'Per-conversation gate for the project cognition registry. Call once at the start of a conversation in a project: it resolves the project against the per-machine whitelist/blacklist and returns exactly one verdict — blacklisted (do nothing), whitelisted-unindexed (create the index), whitelisted-indexed (maintain it: keep aligned after development), or unlisted (ask the user through the user-question overlay, then call this tool again with user_response=accept or decline to record the choice).',
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['list', 'decline', 'allow'], description: 'List the declined projects, record a decline for a project, or lift one.' },
+        project: { type: 'string', description: 'Project root directory. Defaults to the session working directory.' },
+        user_response: { type: 'string', enum: ['accept', 'decline'], description: 'After the user answers the overlay question for an unlisted project: accept records the whitelist, decline records the blacklist.' },
+        remark: { type: 'string', description: 'Optional note stored with the accept/decline record.' },
+      },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => renderText(value),
+    },
+    async execute(rawArgs, exec) {
+      const args = rawArgs ?? {}
+      const root = await resolveProjectRoot(ctx, exec.agent, args.project)
+      const paths = cognitionPaths(root)
+      const hasIndex = await fileExists(paths.root)
+
+      // Resolve the verdict first; the user_response write happens last so a
+      // failing registry store still leaves a correct verdict behind.
+      const response = args.user_response === 'accept' || args.user_response === 'decline' ? args.user_response : undefined
+      let registryError
+      if (response !== undefined) {
+        try {
+          if (response === 'accept') await registry.allowedAdd(root, args.remark ?? '')
+          else await registry.declinedAdd(root, args.remark ?? '')
+        } catch (error) {
+          registryError = error.message
+        }
+      }
+
+      const blacklisted = registry.declinedFor(root)
+      const whitelisted = registry.allowedFor(root)
+      if (blacklisted !== null && whitelisted === null) {
+        const when = typeof blacklisted.declinedAt === 'string' ? ` (recorded ${blacklisted.declinedAt.slice(0, 10)})` : ''
+        return {
+          text: [
+            `VERDICT: blacklisted${when}. The user chose not to maintain a cognition index for ${root}.`,
+            'Do nothing: do not call cognition_init, cognition_overview, or suggest an index in this conversation.',
+            blacklisted.remark ? `Remark: ${blacklisted.remark}` : '',
+          ].filter(Boolean).join('\n'),
+        }
+      }
+      if (whitelisted !== null) {
+        if (hasIndex) {
+          const stateData = await loadState(paths.state)
+          const pending = (stateData?.pending?.length ?? 0) + (stateData?.databasePending?.length ?? 0)
+          return {
+            text: [
+              `VERDICT: whitelisted-indexed. ${root} has a cognition index; keep it dynamically maintained.`,
+              pending > 0
+                ? `Pending maintenance items recorded in state.json: ${pending}. Call cognition_overview to load the index and resolve them.`
+                : 'No pending maintenance items; call cognition_overview before the first edits and cognition_scan after development to stay aligned.',
+            ].join('\n'),
+          }
+        }
+        return {
+          text: [
+            `VERDICT: whitelisted-unindexed. ${root} is whitelisted but has no cognition index yet — create one now:`,
+            '1) cognition_init to create the volume skeleton; 2) cognition_scan for the batch plan;',
+            '3) read each batch\'s files and cognition_update_entries one FRAS entry per file; 4) cognition_verify.',
+            'Entry line format lives in cognition.meta.txt. Track the batches with the task planning tools.',
+          ].join('\n'),
+        }
+      }
+
+      // Unlisted: either the user just answered (record above) or the overlay
+      // question must be asked before anything else.
+      if (response !== undefined) {
+        if (registryError) {
+          return { text: `VERDICT: unlisted (registry write failed: ${registryError}). Fix the registry store, then retry the gate.` }
+        }
+        return {
+          text: response === 'accept'
+            ? `Recorded ${root} on the whitelist. Proceed with index creation: cognition_init → cognition_scan → cognition_update_entries per batch → cognition_verify.`
+            : `Recorded ${root} on the blacklist. Do nothing: no cognition handling in this conversation or later ones.`,
+        }
+      }
+      return {
+        text: [
+          `VERDICT: unlisted. ${root} is neither whitelisted nor blacklisted — ask the user through the user-question overlay (ask_user_question) exactly once:`,
+          '"为这个项目维护认知索引（cognition）吗？" with options 创建 (accept) / 拒绝 (decline).',
+          'Then call cognition_gate again with user_response=accept (whitelist, create the index) or user_response=decline (blacklist, do nothing).',
+        ].join('\n'),
+      }
+    },
+    presentCall: (args) => ({ card: 'generic', title: `Cognition gate${args?.project ? ` — ${args.project}` : ''}`, kind: 'read' }),
+  })
+
+  // ---------------------------------------------------------------- registry
+  tool(ctx, {
+    name: 'cognition_registry',
+    description: 'Maintain the persistent project registry (~/.dsh/project-cognition.json). action="list" shows both the declined (blacklist) and allowed (whitelist) projects; action="decline" blacklists a project; action="allow" lifts a blacklist record (the whitelist counterpart is action="whitelist"); action="whitelist" whitelists a project; action="unwhitelist" removes it from the whitelist. Prefer cognition_gate for the per-conversation decision.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['list', 'decline', 'allow', 'whitelist', 'unwhitelist'], description: 'List both lists, blacklist (decline), lift a blacklist record (allow), whitelist, or remove from the whitelist (unwhitelist).' },
         project: { type: 'string', description: 'Project directory (absolute, or relative to the session working directory). Defaults to the session working directory.' },
         remark: { type: 'string', description: 'Optional note stored with a decline record (e.g. why the user declined).' },
       },
@@ -1044,7 +1123,7 @@ export function apply(ctx, userConfig = {}) {
       render: (_args, value) => renderText(value),
     },
     async execute(args, exec) {
-      const action = args.action === 'decline' || args.action === 'allow' ? args.action : 'list'
+      const action = ['decline', 'allow', 'whitelist', 'unwhitelist'].includes(args.action) ? args.action : 'list'
       if (action === 'list') {
         let store
         try {
@@ -1052,17 +1131,43 @@ export function apply(ctx, userConfig = {}) {
         } catch (error) {
           return { text: `cognition_registry: ${error.message}` }
         }
-        const rows = registry.listDeclined(store)
-        const lines = [`# Project registry (declined cognition-index projects): ${rows.length} record(s)`, `store: ${registry.registryPath()}`]
+        const declinedRows = registry.listDeclined(store)
+        const allowedRows = registry.listAllowed(store)
+        const lines = [`# Project registry: ${declinedRows.length} blacklisted, ${allowedRows.length} whitelisted`, `store: ${registry.registryPath()}`]
         if (store.malformed === true) lines.push('WARNING: the store file is not valid JSON; fix or delete it before editing records.')
-        for (const row of rows) {
+        lines.push('## Blacklist (declined cognition-index creation)')
+        for (const row of declinedRows) {
           lines.push(`- ${row.path} | declined ${row.declinedAt ?? '?'}${row.remark ? ` | remark: ${row.remark}` : ''}`)
         }
-        if (rows.length === 0) lines.push('(no declined projects recorded)')
+        if (declinedRows.length === 0) lines.push('(none)')
+        lines.push('## Whitelist (allowed, index created or maintained)')
+        for (const row of allowedRows) {
+          lines.push(`- ${row.path} | allowed ${row.allowedAt ?? '?'}${row.remark ? ` | remark: ${row.remark}` : ''}`)
+        }
+        if (allowedRows.length === 0) lines.push('(none)')
         return { text: lines.join('\n') }
       }
       const root = await resolveProjectRoot(ctx, exec.agent, args.project)
       try {
+        if (action === 'whitelist' || action === 'unwhitelist') {
+          if (action === 'whitelist') {
+            const result = await registry.allowedAdd(root, args.remark ?? '')
+            return {
+              text: [
+                result.added
+                  ? `Recorded: ${root} is whitelisted — sessions will create or maintain its cognition index without asking.`
+                  : `Already recorded: ${root} is already whitelisted (nothing changed).`,
+                'Call cognition_registry with action="unwhitelist" to remove it.',
+              ].join('\n'),
+            }
+          }
+          const result = await registry.allowedRemove(root)
+          return {
+            text: result.removed
+              ? `Removed: ${root} is no longer whitelisted; the gate will treat it as unlisted again.`
+              : `Nothing to remove: ${root} is not whitelisted.`,
+          }
+        }
         if (action === 'decline') {
           const result = await registry.declinedAdd(root, args.remark ?? '')
           return {

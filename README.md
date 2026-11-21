@@ -42,13 +42,14 @@ lib/scanner.js[CG9]: F:职责 | R:code:lib/state.js,... | A:导出接口 | S:非
 | `cognition_database_init` | 导入 .sql DDL dump（mysqldump / pg_dump 输出）为 Schema Evidence，零网络 |
 | `cognition_database_scan` | 检测表级漂移（缺条目 / 孤儿条目） |
 | `cognition_verify` | 聚合门禁：重校验全部卷的条目，返回对齐结论或违规清单 |
-| `cognition_registry` | 跨会话名单：记录"该项目不建索引"（decline / allow / list） |
+| `cognition_gate` | 每次会话开始的门禁：黑名单不处理；白名单建索引或动态维护；未登记时经覆盖对话框询问一次并把选择写入对应名单 |
+| `cognition_registry` | 维护白/黑名单注册表（decline / allow / whitelist / unwhitelist / list） |
 
 ## 快速开始
 
 1. 在 DSH 中安装本插件包（`plugin_manager install_bundle`）。
 2. 在目标项目里对 AI 说：**"为这个项目建立认知索引"**，然后跟随 `cognition_scan` 返回的分批计划逐批撰写。
-3. 之后每个新会话开始时，AI 调用一次 `cognition_overview` 即获得项目全局认知。
+3. 之后每个新会话开始时，AI 先调 `cognition_gate` 确认名单状态（未登记项目会弹对话框询问一次），再调 `cognition_overview` 获得项目全局认知。
 4. 完成开发后 AI 会自动 `cognition_scan` → `cognition_update_entries`，保持索引与代码对齐。
 
 ## 只读 Web 面板
