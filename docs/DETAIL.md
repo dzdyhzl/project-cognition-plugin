@@ -10,6 +10,7 @@
 - **增量维护**：开发完成后调用 `cognition_scan` 检测漂移（Missing 已删文件 / Orphan 新文件 / Stale 内容已变），用 `cognition_update_entries` / `cognition_remove_entries` 补齐，索引回到与代码对齐的状态。
 - **影响分析**：`cognition_search` 传 `relations=impact` + `path=目标文件`，沿模型撰写的正式 R 关系反向遍历传递闭包，逐层输出"改这个文件可能波及哪些条目"（derived=true，只走显式 R 边，不自动推断）。
 - **覆盖率与规模**：overview 与 scan 报告索引覆盖了多少受管代码（文件数/行数百分比），并估算索引的 token 规模；大索引的 overview 分块按估算 token 预算（默认 7000，配置 `overviewChunkTokens`）切分，而不是固定条数。
+- **跨宿主规则块**：`cognition_init` 传 `agents_md=true` 向项目根 `AGENTS.md` 写入定界托管块（`<!-- project-cognition:start/end -->`），块内是工作流规则（gate→overview→scan→update/verify→impact），幂等可更新；块外用户内容零改动。对应 AOCI-CODE `init` 写受管 AGENTS.md 规则块的做法，简化为 opt-in 单宿主无关形态。
 - **快照与演化**：`cognition_snapshot` 输出一份确定性只读 JSON 观察（条目清单+条目哈希+覆盖率+token 规模），由调用方自行保存（如存到仓库外或 Git 历史里）；`cognition_evolution` 读入旧快照与当前状态对比——新增/删除/变更条目、覆盖率百分比变化、索引 token 变化、待维护差值。两者都不落盘到项目内，对应 AOCI-CODE 的 snapshot/evolution 派生观察。
 - **诊断**：`cognition_doctor` 一次性体检索引环境——分卷骨架、Meta 字典可解析、state.json 完整性（v1/v2、条目/文件哈希一致性、待办清单异常）、schema evidence 与声明一致性、漂移摘要、覆盖率、索引规模与分块预算；输出逐项 HEALTHY / WARN / FAIL 结论，索引行为异常或从 Git 恢复后可运行。
 - **只读 Web 面板**：左侧栏新增"项目认知索引"页：选一个已登记的工作区，即可查看代码/数据库条目数、漂移计数（missing/orphan/stale）、待写清单、数据库 evidence 状态与 verify 对齐结论，30 秒自动刷新可关。面板严格只读，所有写入仍通过会话中的 cognition_* 工具完成。

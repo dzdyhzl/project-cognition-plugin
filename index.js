@@ -82,7 +82,10 @@ const PROMPT_TEXT = [
   'through the user-question overlay, then answering the gate with user_response=accept',
   '(create the index and record the whitelist) or decline (record the blacklist). Track',
   'multi-step index work with the task planning tools. Write entry semantics from real',
-  'source code; the tools validate structure, tags, and quotas only.',
+  'source code; the tools validate structure, tags, and quotas only. Before changing an',
+  'indexed object, cognition_search with relations=impact shows what may be affected;',
+  'after code and tests are stable, cognition_scan then cognition_update_entries /',
+  'cognition_remove_entries bring the index back to aligned.',
 ].join(' ')
 
 const fmt = format
@@ -100,6 +103,9 @@ const removeDatabasePending = state.removeDatabasePending
 const volumeTemplates = templates.volumeTemplates
 const rootWithDatabaseVolume = templates.rootWithDatabaseVolume
 const COGNITION_GITIGNORE = templates.COGNITION_GITIGNORE
+const upsertAgentsBlock = templates.upsertAgentsBlock
+const hasAgentsBlock = templates.hasAgentsBlock
+const agentsBlock = templates.agentsBlock
 
 /** Resolve the project root for a tool call: explicit arg, else the session working directory. */
 async function resolveProjectRoot(ctx, agent, requested) {
@@ -432,6 +438,7 @@ export function apply(ctx, userConfig = {}) {
       properties: {
         project: { type: 'string', description: 'Project root directory. Defaults to the session working directory.' },
         locale: { type: 'string', enum: ['zh-CN', 'en-US'], description: `Volume language. Default ${localeDefault}.` },
+        agents_md: { type: 'boolean', description: 'Also write a managed project-cognition rules block into AGENTS.md at the project root, so other agent hosts (Codex, Claude Code, ...) follow the same workflow. Content outside the block is never touched. Default false.' },
       },
     },
     output: {
@@ -453,6 +460,20 @@ export function apply(ctx, userConfig = {}) {
       await fmt.atomicWriteText(paths.gitignore, COGNITION_GITIGNORE)
       const state = emptyState(basename(root), locale)
       await saveState(paths.state, state)
+      // Optional AGENTS.md managed block for cross-host portability.
+      let agentsNote = ''
+      if (args.agents_md === true) {
+        const agentsFile = join(root, 'AGENTS.md')
+        const existing = await fileExists(agentsFile) ? await readFile(agentsFile, 'utf8') : null
+        if (!hasAgentsBlock(existing)) {
+          await fmt.atomicWriteText(agentsFile, upsertAgentsBlock(existing, locale))
+          agentsNote = existing === null
+            ? 'AGENTS.md created with the managed rules block.'
+            : 'AGENTS.md updated: the managed rules block was appended (your existing content is untouched).'
+        } else {
+          agentsNote = 'AGENTS.md already carries the managed rules block; left as-is.'
+        }
+      }
       // An initialized index supersedes any earlier declined record.
       let lifted = false
       try {
@@ -462,6 +483,7 @@ export function apply(ctx, userConfig = {}) {
       return {
         text: [
           `Initialized cognition index at ${paths.dir}.`,
+          ...(agentsNote ? [agentsNote] : []),
           ...(lifted ? ['The declined-list record for this project was lifted.'] : []),
           'Next: call cognition_scan to list managed files, then author FRAS entries batch by batch with cognition_update_entries.',
           'Commit .cognition/ to Git (state.json is ignored by the generated .cognition/.gitignore).',
@@ -1372,6 +1394,17 @@ export function apply(ctx, userConfig = {}) {
         const codeText = await readFile(paths.code, 'utf8')
         const tokens = fmt.estimateTokens(codeText) + (present.meta ? fmt.estimateTokens(await readFile(paths.meta, 'utf8')) : 0)
         add(tokens <= chunkTokenBudget ? 'HEALTHY' : 'WARN', 'index size', `~${tokens} tokens; ${tokens <= chunkTokenBudget ? 'fits one overview delivery' : `exceeds the ${chunkTokenBudget}-token chunk budget — overview delivers in chunks`}`)
+      }
+
+      // 8. AGENTS.md managed block (cross-host portability; informational)
+      const agentsFile = join(root, 'AGENTS.md')
+      if (await fileExists(agentsFile)) {
+        const agentsText = await readFile(agentsFile, 'utf8')
+        add(hasAgentsBlock(agentsText) ? 'HEALTHY' : 'WARN', 'AGENTS.md block', hasAgentsBlock(agentsText)
+          ? 'managed rules block present'
+          : 'AGENTS.md exists without the managed rules block — cognition_init with agents_md=true appends one (existing content untouched)')
+      } else {
+        add('HEALTHY', 'AGENTS.md block', 'no AGENTS.md in this project (optional: cognition_init agents_md=true creates one for non-DSH hosts)')
       }
       return renderDoctor(root, items)
     },
