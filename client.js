@@ -257,11 +257,19 @@ window.__ModuleLoader__.load({
           setLoading(false)
         }
         // Registry lists are global (not per project); fetch once alongside.
-        try {
-          setRegistry(await api.registryList({}))
-          setRegistryError(null)
-        } catch (cause) {
-          setRegistryError(cause?.message ?? String(cause))
+        // Feature-detect: a Host that has not reloaded the plugin since v1.18.x
+        // has no registryList remote method — show a reload hint instead of failing.
+        if (typeof api.registryList !== 'function') {
+          setRegistry(null)
+          setRegistryError('面板名单功能需要重载 Host 后生效（registryList 远端方法缺失）')
+        } else {
+          try {
+            setRegistry(await api.registryList({}))
+            setRegistryError(null)
+          } catch (cause) {
+            setRegistry(null)
+            setRegistryError(cause?.message ?? String(cause))
+          }
         }
       }, [api])
 
@@ -601,6 +609,7 @@ window.__ModuleLoader__.load({
         panelData: request => call('panelData', request),
         sessionGate: request => call('sessionGate', request),
         gateDecision: request => call('gateDecision', request),
+        registryList: request => call('registryList', request),
       }
 
       ctx.effect(() => ctx.slots.inject('main', () => ctx.slots.register({
