@@ -445,7 +445,7 @@ export function apply(ctx, userConfig = {}) {
       properties: {
         project: { type: 'string', description: 'Project root directory. Defaults to the session working directory.' },
         locale: { type: 'string', enum: ['zh-CN', 'en-US'], description: `Volume language. Default ${localeDefault}.` },
-        agents_md: { type: 'boolean', description: 'Also write a managed project-cognition rules block into AGENTS.md at the project root, so other agent hosts (Codex, Claude Code, ...) follow the same workflow. Content outside the block is never touched. Default false.' },
+        agents_md: { type: 'boolean', description: 'Write a managed project-cognition rules block into AGENTS.md at the project root (so this and other agent hosts always see the maintenance rule: after every change, scan + update entries until verify aligned). Default true; pass false to skip. Content outside the block is never touched.' },
       },
     },
     output: {
@@ -469,7 +469,7 @@ export function apply(ctx, userConfig = {}) {
       await saveState(paths.state, state)
       // Optional AGENTS.md managed block for cross-host portability.
       let agentsNote = ''
-      if (args.agents_md === true) {
+      if (args.agents_md !== false) {
         const agentsFile = join(root, 'AGENTS.md')
         const existing = await fileExists(agentsFile) ? await readFile(agentsFile, 'utf8') : null
         if (!hasAgentsBlock(existing)) {

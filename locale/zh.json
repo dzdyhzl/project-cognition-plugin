@@ -6,7 +6,7 @@
   },
   "tools": {
     "cognition_overview": "开发前读取整份认知索引；大索引分块交付，含数据库卷。",
-    "cognition_init": "创建 .cognition/ 分卷骨架；agents_md=true 时向 AGENTS.md 追加受管规则块，供非 DSH 宿主遵循同一工作流。",
+    "cognition_init": "创建 .cognition/ 分卷骨架；默认向 AGENTS.md 写入受管规则块（含“每次改动后必须维护索引”的强制规则），agents_md=false 跳过。",
     "cognition_scan": "报告 Missing/Orphan/Stale 漂移并给出分批撰写计划。",
     "cognition_update_entries": "校验并分批写入 FRAS 条目（code/database 卷）。",
     "cognition_remove_entries": "移除已删除文件/表的条目。",

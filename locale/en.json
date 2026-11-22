@@ -8,7 +8,7 @@
     "cognition_overview": {
       "summary": "Load the whole cognition map before working on a project; chunked delivery for large indexes, includes the database volume."
     },
-    "cognition_init": "Create the .cognition/ volume skeleton; agents_md=true also appends a managed rules block to AGENTS.md for cross-host portability.",
+    "cognition_init": "Create the .cognition/ volume skeleton; by default writes a managed AGENTS.md rules block (mandating index maintenance after every change) — agents_md=false skips it.",
     "cognition_scan": "Report missing/orphan/stale drift and a batched authoring plan.",
     "cognition_update_entries": "Validate and write FRAS entries (code/database volumes).",
     "cognition_remove_entries": "Drop entries whose files/tables were deleted.",

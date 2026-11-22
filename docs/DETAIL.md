@@ -19,7 +19,7 @@
 - **面板分块计划**：面板与 overview 使用同一个 token 估算器计算当前索引需要的分块交付数（默认 7000 token/块预算），展示整卷一次交付还是分几块。
 - **回归测试**：`test/plugin.test.js`（node:test，零依赖）覆盖纯函数库（format/scanner/state/ddl/templates）与全部 cognition_* 工具的 mock-ctx 端到端链路；注册表经环境变量隔离，可安全重复运行。
 - **刷新阈值**：`overview` 在待办条数达到配置阈值（`refreshThreshold`，默认 30）时提示先 `cognition_scan` 再依赖索引图景，对应 AOCI-CODE 的语义刷新阈值。
-- **跨宿主规则块**：`cognition_init` 传 `agents_md=true` 向项目根 `AGENTS.md` 写入定界托管块（`<!-- project-cognition:start/end -->`），块内是工作流规则（gate→overview→scan→update/verify→impact），幂等可更新；块外用户内容零改动。对应 AOCI-CODE `init` 写受管 AGENTS.md 规则块的做法，简化为 opt-in 单宿主无关形态。
+- **跨宿主规则块**：`cognition_init` 默认向项目根 `AGENTS.md` 写入定界托管块（`agents_md=false` 跳过），块内把“每次对项目改动后必须维护索引直到 aligned”列为强制规则（`<!-- project-cognition:start/end -->`），块内是工作流规则（gate→overview→scan→update/verify→impact），幂等可更新；块外用户内容零改动。对应 AOCI-CODE `init` 写受管 AGENTS.md 规则块的做法，简化为 opt-in 单宿主无关形态。
 - **快照与演化**：`cognition_snapshot` 输出一份确定性只读 JSON 观察（条目清单+条目哈希+覆盖率+token 规模），由调用方自行保存（如存到仓库外或 Git 历史里）；`cognition_evolution` 读入旧快照与当前状态对比——新增/删除/变更条目、覆盖率百分比变化、索引 token 变化、待维护差值。两者都不落盘到项目内，对应 AOCI-CODE 的 snapshot/evolution 派生观察。
 - **诊断**：`cognition_doctor` 一次性体检索引环境——分卷骨架、Meta 字典可解析、state.json 完整性（v1/v2、条目/文件哈希一致性、待办清单异常）、schema evidence 与声明一致性、漂移摘要、覆盖率、索引规模与分块预算；输出逐项 HEALTHY / WARN / FAIL 结论，索引行为异常或从 Git 恢复后可运行。
 - **只读 Web 面板**：左侧栏新增"项目认知索引"页：选一个已登记的工作区，即可查看代码/数据库条目数、漂移计数（missing/orphan/stale）、待写清单、数据库 evidence 状态与 verify 对齐结论，30 秒自动刷新可关。面板严格只读，所有写入仍通过会话中的 cognition_* 工具完成。

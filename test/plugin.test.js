@@ -256,17 +256,18 @@ test('tools: full authoring loop — init, scan, update, verify, search, relatio
   assert.match(init.text, /Initialized cognition index/)
 
   const scan1 = await tools.cognition_scan.execute({}, exec)
-  assert.match(scan1.text, /managed files: 4/)
-  assert.match(scan1.text, /orphan=4/)
-  assert.match(scan1.text, /coverage: 0\/4 files/)
+  assert.match(scan1.text, /managed files: 5/) // 4 source files + AGENTS.md written by default init
+  assert.match(scan1.text, /orphan=5/)
+  assert.match(scan1.text, /coverage: 0\/5 files/)
 
   const upd = await tools.cognition_update_entries.execute({ entries: [
     { path: 'src/core.js', tags: 'CG5', f: 'core', r: '-', a: 'core', s: '-' },
     { path: 'src/mid.js', tags: 'CG5', f: 'mid', r: 'code:src/core.js', a: 'mid', s: '-' },
     { path: 'src/app.js', tags: 'AB7', f: 'app', r: 'code:src/mid.js', a: 'app', s: '-' },
     { path: 'README.md', tags: 'SG3', f: 'readme', r: '-', a: '-', s: '-' },
+    { path: 'AGENTS.md', tags: 'SG3', f: 'host rules with the managed cognition block', r: '-', a: '-', s: '-' },
   ] }, exec)
-  assert.match(upd.text, /accepted: 4 \| rejected: 0/)
+  assert.match(upd.text, /accepted: 5 \| rejected: 0/)
 
   const verify = await tools.cognition_verify.execute({}, exec)
   assert.match(verify.text, /aligned=true/)
@@ -381,7 +382,7 @@ test('tools: overview delivers whole small index and reports tokens and coverage
   await tools.cognition_update_entries.execute({ entries: [{ path: 'src/a.js', tags: 'CG5', f: 'a', r: '-', a: 'a', s: '-' }] }, exec)
   const overview = await tools.cognition_overview.execute({}, exec)
   assert.match(overview.text, /# Index size: ~\d+ tokens/)
-  assert.match(overview.text, /## Coverage: 1\/1 files \(100%\)/)
+  assert.match(overview.text, /## Coverage: 1\/2 files \(50%\)/) // AGENTS.md (created by default init) is managed but not indexed
   assert.match(overview.text, /## Code volume/)
   // chunked delivery with a tiny token budget still covers everything
   process.env.PROJECT_COGNITION_REGISTRY = ''
@@ -639,4 +640,26 @@ test('panel: registryRemove lifts blacklist and removes whitelist entries', asyn
     else process.env.PROJECT_COGNITION_REGISTRY = previous
     await rm(regDir, { recursive: true, force: true })
   }
+})
+
+test('tools: init writes the managed AGENTS.md block by default; agents_md=false skips it', async () => {
+  // default: block written, with the mandatory maintenance line
+  const root1 = await makeProject()
+  const tools1 = await loadPlugin(root1)
+  await tools1.cognition_init.execute({}, { agent: 'test' })
+  const agents1 = await readFile(join(root1, 'AGENTS.md'), 'utf8')
+  assert.ok(templatesMod.hasAgentsBlock(agents1))
+  assert.ok(agents1.includes('每次对项目做出改动') || agents1.includes('After every change to the project'))
+
+  // explicit opt-out: no AGENTS.md at all
+  const root2 = await makeProject()
+  const tools2 = await loadPlugin(root2)
+  await tools2.cognition_init.execute({ agents_md: false }, { agent: 'test' })
+  await assert.rejects(() => readFile(join(root2, 'AGENTS.md'), 'utf8'), { code: 'ENOENT' })
+
+  // scan after init counts AGENTS.md as a managed orphan file
+  const scan = await tools1.cognition_scan.execute({}, { agent: 'test' })
+  assert.match(scan.text, /AGENTS\.md/)
+  await rm(root1, { recursive: true, force: true })
+  await rm(root2, { recursive: true, force: true })
 })
