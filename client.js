@@ -73,6 +73,9 @@ window.__ModuleLoader__.load({
       registryRemoved: '已移出名单',
       registryRemoveFailed: '移除失败',
       registryRemoveHint: '点击条目右侧的移出按钮可直接将该路径移出名单（黑名单=解除登记，白名单=移出白名单）；新增仍需在会话中完成。',
+      registryView: '查看',
+      registryViewClose: '收起',
+      registryViewTitle: '项目 cognition 配置',
       copied: '已复制',
       coverageFiles: '文件',
       coverageLines: '行',
@@ -144,6 +147,9 @@ window.__ModuleLoader__.load({
       registryRemoved: 'Removed',
       registryRemoveFailed: 'Remove failed',
       registryRemoveHint: 'Use the remove button on each row to drop the path from its list (blacklist = lift record, whitelist = remove); adding entries still happens in a session.',
+      registryView: 'View',
+      registryViewClose: 'Collapse',
+      registryViewTitle: 'Project cognition snapshot',
       copied: 'Copied',
       coverageFiles: 'files',
       coverageLines: 'lines',
@@ -199,6 +205,8 @@ window.__ModuleLoader__.load({
 .pcp-spinner { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--dsw-alias-border-l3);
   border-top-color: var(--dsw-alias-state-business-primary); animation: pcp-spin 0.8s linear infinite; display: inline-block; vertical-align: -2px; }
 @keyframes pcp-spin { to { transform: rotate(360deg); } }
+.pcp-viewbox { border: 0.5px solid var(--dsw-alias-border-l3); border-radius: var(--dsw-radius-lg, 10px);
+  background: var(--dsw-alias-bg-layer-1, transparent); padding: 12px 16px 8px; margin: 10px 0; }
 `
 
     function Style() {
@@ -242,13 +250,18 @@ window.__ModuleLoader__.load({
       )))
     }
 
-    function RegistryRow({ row, timeKey, t, removing, onRemove }) {
+    function RegistryRow({ row, timeKey, t, removing, onRemove, onView, viewExpanded, viewing }) {
       const when = typeof row[timeKey] === 'string' ? row[timeKey].slice(0, 10) : '?'
       return h('li', { key: row.path, className: 'pcp-entry', style: { display: 'flex', alignItems: 'center', gap: '8px' } },
         h('div', { style: { flex: '1 1 auto', minWidth: 0 } },
           h('div', { style: { overflowWrap: 'anywhere' } }, row.path),
           h('div', { className: 'pcp-note' },
             `${when}${row.remark ? ' · ' + t('registryRemark') + ': ' + row.remark : ''} · ${row.hasIndex ? t('registryHasIndex') : t('registryNoIndex')}`)),
+        onView !== undefined && h('button', {
+          className: 'pcp-btn',
+          disabled: viewing,
+          onClick: onView,
+        }, viewing ? t('loading') : viewExpanded ? t('registryViewClose') : t('registryView')),
         h('button', {
           className: 'pcp-btn',
           disabled: removing,
@@ -256,151 +269,16 @@ window.__ModuleLoader__.load({
         }, removing ? t('registryRemoving') : t('registryRemove')))
     }
 
-    function PanelPage({ api, workspaces, t, locale }) {
-      const [project, setProject] = useState(workspaces[0]?.path ?? null)
-      const [data, setData] = useState(null)
-      const [error, setError] = useState(null)
-      const [loading, setLoading] = useState(false)
-      const [registry, setRegistry] = useState(null)
-      const [registryError, setRegistryError] = useState(null)
-      const [removing, setRemoving] = useState(null) // { list, path } while a removal is in flight
-      const [auto, setAuto] = useState(true)
-      const projectRef = useRef(project)
-      projectRef.current = project
-
-      const load = useCallback(async () => {
-        const target = projectRef.current
-        if (target === null) return
-        setLoading(true)
-        try {
-          const snapshot = await api.panelData({ project: target })
-          setData(snapshot)
-          setError(null)
-        } catch (cause) {
-          setError(cause?.message ?? String(cause))
-        } finally {
-          setLoading(false)
-        }
-        // Registry lists are global (not per project); fetch once alongside.
-        // Feature-detect: a Host that has not reloaded the plugin since v1.18.x
-        // has no registryList remote method — show a reload hint instead of failing.
-        if (typeof api.registryList !== 'function') {
-          setRegistry(null)
-          setRegistryError('面板名单功能需要重载 Host 后生效（registryList 远端方法缺失）')
-        } else {
-          try {
-            setRegistry(await api.registryList({}))
-            setRegistryError(null)
-          } catch (cause) {
-            setRegistry(null)
-            setRegistryError(cause?.message ?? String(cause))
-          }
-        }
-      }, [api])
-
-      const removeRow = useCallback(async (list, path) => {
-        if (typeof api.registryRemove !== 'function') {
-          setRemoving(null)
-          setRegistryError('面板移除功能需要重载 Host 后生效（registryRemove 远端方法缺失）')
-          return
-        }
-        setRemoving({ list, path })
-        try {
-          await api.registryRemove({ list, project: path })
-          // refresh the lists after a successful removal
-          setRegistry(await api.registryList({}))
-          setRegistryError(null)
-        } catch (cause) {
-          setRegistryError(cause?.message ?? String(cause))
-        } finally {
-          setRemoving(null)
-        }
-      }, [api])
-
-      useEffect(() => { load() }, [load, project])
-      useEffect(() => {
-        if (!auto) return undefined
-        const timer = setInterval(() => { load() }, 30_000)
-        return () => clearInterval(timer)
-      }, [auto, load])
-
-      if (workspaces.length === 0) {
-        return h('div', { className: 'pcp-page' }, h(Style, null), h('div', { className: 'pcp-gate' }, h('p', null, t('noWorkspace'))))
-      }
-      if (data !== null && data.indexExists === false) {
-        const declined = data.declined === true
-        const remark = typeof data.declinedRemark === 'string' && data.declinedRemark !== '' ? ` · ${data.declinedRemark}` : ''
-        const when = typeof data.declinedAt === 'string' ? data.declinedAt.slice(0, 10) : '—'
-        return h('div', { className: 'pcp-page' }, h(Style, null),
-          h('div', { className: 'pcp-header' }, headerControls()),
-          h('div', { className: 'pcp-gate' },
-            h('p', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } },
-              declined ? t('declinedTitle') : t('noIndexTitle')),
-            declined
-              ? h('p', null, t('declinedBody', { time: when, remark }))
-              : h('p', null, t('noIndexBody')),
-            declined && h('p', { className: 'pcp-note' }, t('declinedLift'))))
-      }
-      if (error !== null && data === null) {
-        return h('div', { className: 'pcp-page' }, h(Style, null),
-          h('div', { className: 'pcp-header' }, headerControls()),
-          h('p', { className: 'pcp-error' }, t('failed', { message: error })),
-          h('button', { className: 'pcp-btn', onClick: () => load() }, t('retry')))
-      }
-      if (data === null) {
-        return h('div', { className: 'pcp-page' }, h(Style, null),
-          h('div', { className: 'pcp-header' }, headerControls()),
-          h('p', { className: 'pcp-note' }, h('span', { className: 'pcp-spinner' }), ' ', t('loading')))
-      }
-
+    /**
+     * Read-only snapshot body shared by the main panel page and the
+     * per-project view opened from a whitelist row (registryView).
+     */
+    function SnapshotView({ data, t, locale }) {
       const drift = data.drift
       const driftClean = drift !== null && drift.missing === 0 && drift.orphan === 0 && drift.stale === 0
       const dbDrift = data.database?.drift
       const aligned = data.verify?.violationsTotal === 0 && data.verify?.error === undefined
-
-      function headerControls() {
-        return [
-          h('span', { className: 'pcp-title' }, t('panel')),
-          h('select', {
-            className: 'pcp-select',
-            value: project ?? '',
-            onChange: event => setProject(event.target.value),
-            'aria-label': t('pickProject'),
-          }, workspaces.map(workspace => h('option', { key: workspace.path, value: workspace.path }, workspace.title || workspace.path))),
-          h('button', { className: 'pcp-btn', onClick: () => load() }, loading ? `⟳ ${t('refresh')}` : t('refresh')),
-          h('label', { className: 'pcp-check' },
-            h('input', { type: 'checkbox', checked: auto, onChange: event => setAuto(event.target.checked) }),
-            t('auto')),
-        ]
-      }
-
-      return h('div', { className: 'pcp-page' }, h(Style, null),
-        h('div', { className: 'pcp-section' }, t('registryTitle')),
-        registryError !== null && h('p', { className: 'pcp-error' }, registryError),
-        registry !== null && h('div', null,
-          h('div', { className: 'pcp-note' }, `${t('registryStore')}: ${registry.storePath}`),
-          registry.malformed === true && h('p', { className: 'pcp-error' }, t('failed', { message: 'the store file is not valid JSON' })),
-          h('div', { style: { display: 'flex', gap: '2rem', flexWrap: 'wrap' } },
-            h('div', { style: { flex: '1 1 20rem' } },
-              h('div', { className: 'pcp-note', style: { fontWeight: 600 } }, `${t('blacklistTitle')} (${registry.declined.length})`),
-              registry.declined.length === 0
-                ? h('div', { className: 'pcp-note' }, t('registryEmpty'))
-                : h('ul', { className: 'pcp-list' }, registry.declined.map(row => RegistryRow({
-                  row, timeKey: 'declinedAt', t,
-                  removing: removing !== null && removing.list === 'declined' && removing.path === row.path,
-                  onRemove: () => removeRow('declined', row.path),
-                })))),
-            h('div', { style: { flex: '1 1 20rem' } },
-              h('div', { className: 'pcp-note', style: { fontWeight: 600 } }, `${t('whitelistTitle')} (${registry.allowed.length})`),
-              registry.allowed.length === 0
-                ? h('div', { className: 'pcp-note' }, t('registryEmpty'))
-                : h('ul', { className: 'pcp-list' }, registry.allowed.map(row => RegistryRow({
-                  row, timeKey: 'allowedAt', t,
-                  removing: removing !== null && removing.list === 'allowed' && removing.path === row.path,
-                  onRemove: () => removeRow('allowed', row.path),
-                }))))),
-          h('p', { className: 'pcp-note' }, t('registryEditHint'))),
-          h('p', { className: 'pcp-note' }, t('registryRemoveHint')),
+      return h('div', null,
         h('div', { className: 'pcp-cards' },
           h(StatCard, { num: data.volumes?.code?.entries ?? 0, label: t('codeEntries') }),
           h(StatCard, { num: data.volumes?.database?.entries ?? 0, label: t('dbEntries') }),
@@ -458,6 +336,188 @@ window.__ModuleLoader__.load({
         (data.volumes?.code?.parseWarnings ?? 0) + (data.volumes?.database?.parseWarnings ?? 0) > 0 &&
           h('p', { className: 'pcp-note' }, `⚠ ${t('parseWarnings')}: ${(data.volumes?.code?.parseWarnings ?? 0) + (data.volumes?.database?.parseWarnings ?? 0)}`),
         h('p', { className: 'pcp-note' }, `${t('updated', { time: new Date(data.updatedAt).toLocaleString(locale === 'zh' ? 'zh-CN' : 'en-US') })} · ${t('readonly')}`))
+    }
+
+
+    function PanelPage({ api, workspaces, t, locale }) {
+      const [project, setProject] = useState(workspaces[0]?.path ?? null)
+      const [data, setData] = useState(null)
+      const [error, setError] = useState(null)
+      const [loading, setLoading] = useState(false)
+      const [registry, setRegistry] = useState(null)
+      const [registryError, setRegistryError] = useState(null)
+      const [removing, setRemoving] = useState(null) // { list, path } while a removal is in flight
+      const [viewPath, setViewPath] = useState(null) // whitelist row currently expanded into a snapshot view
+      const [viewData, setViewData] = useState(null)
+      const [viewLoading, setViewLoading] = useState(false)
+      const [viewError, setViewError] = useState(null)
+      const [auto, setAuto] = useState(true)
+      const projectRef = useRef(project)
+      projectRef.current = project
+
+      const load = useCallback(async () => {
+        const target = projectRef.current
+        if (target === null) return
+        setLoading(true)
+        try {
+          const snapshot = await api.panelData({ project: target })
+          setData(snapshot)
+          setError(null)
+        } catch (cause) {
+          setError(cause?.message ?? String(cause))
+        } finally {
+          setLoading(false)
+        }
+        // Registry lists are global (not per project); fetch once alongside.
+        // Feature-detect: a Host that has not reloaded the plugin since v1.18.x
+        // has no registryList remote method — show a reload hint instead of failing.
+        if (typeof api.registryList !== 'function') {
+          setRegistry(null)
+          setRegistryError('面板名单功能需要重载 Host 后生效（registryList 远端方法缺失）')
+        } else {
+          try {
+            setRegistry(await api.registryList({}))
+            setRegistryError(null)
+          } catch (cause) {
+            setRegistry(null)
+            setRegistryError(cause?.message ?? String(cause))
+          }
+        }
+      }, [api])
+
+      const removeRow = useCallback(async (list, path) => {
+        if (typeof api.registryRemove !== 'function') {
+          setRemoving(null)
+          setRegistryError('面板移除功能需要重载 Host 后生效（registryRemove 远端方法缺失）')
+          return
+        }
+        setRemoving({ list, path })
+        try {
+          await api.registryRemove({ list, project: path })
+          // refresh the lists after a successful removal
+          setRegistry(await api.registryList({}))
+          // a removed row has no snapshot to show anymore
+          setViewPath(current => { if (current === path) { setViewData(null); setViewError(null); return null } return current })
+          setRegistryError(null)
+        } catch (cause) {
+          setRegistryError(cause?.message ?? String(cause))
+        } finally {
+          setRemoving(null)
+        }
+      }, [api])
+
+      // Expand (or collapse) the per-project snapshot view under the whitelist
+      // column; the snapshot is the same read-only panelData payload.
+      const toggleView = useCallback(async (path) => {
+        if (viewPath === path) {
+          setViewPath(null)
+          setViewData(null)
+          setViewError(null)
+          return
+        }
+        setViewPath(path)
+        setViewData(null)
+        setViewError(null)
+        setViewLoading(true)
+        try {
+          setViewData(await api.panelData({ project: path }))
+        } catch (cause) {
+          setViewError(cause?.message ?? String(cause))
+        } finally {
+          setViewLoading(false)
+        }
+      }, [api, viewPath])
+
+      useEffect(() => { load() }, [load, project])
+      useEffect(() => {
+        if (!auto) return undefined
+        const timer = setInterval(() => { load() }, 30_000)
+        return () => clearInterval(timer)
+      }, [auto, load])
+
+      if (workspaces.length === 0) {
+        return h('div', { className: 'pcp-page' }, h(Style, null), h('div', { className: 'pcp-gate' }, h('p', null, t('noWorkspace'))))
+      }
+      if (data !== null && data.indexExists === false) {
+        const declined = data.declined === true
+        const remark = typeof data.declinedRemark === 'string' && data.declinedRemark !== '' ? ` · ${data.declinedRemark}` : ''
+        const when = typeof data.declinedAt === 'string' ? data.declinedAt.slice(0, 10) : '—'
+        return h('div', { className: 'pcp-page' }, h(Style, null),
+          h('div', { className: 'pcp-header' }, headerControls()),
+          h('div', { className: 'pcp-gate' },
+            h('p', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } },
+              declined ? t('declinedTitle') : t('noIndexTitle')),
+            declined
+              ? h('p', null, t('declinedBody', { time: when, remark }))
+              : h('p', null, t('noIndexBody')),
+            declined && h('p', { className: 'pcp-note' }, t('declinedLift'))))
+      }
+      if (error !== null && data === null) {
+        return h('div', { className: 'pcp-page' }, h(Style, null),
+          h('div', { className: 'pcp-header' }, headerControls()),
+          h('p', { className: 'pcp-error' }, t('failed', { message: error })),
+          h('button', { className: 'pcp-btn', onClick: () => load() }, t('retry')))
+      }
+      if (data === null) {
+        return h('div', { className: 'pcp-page' }, h(Style, null),
+          h('div', { className: 'pcp-header' }, headerControls()),
+          h('p', { className: 'pcp-note' }, h('span', { className: 'pcp-spinner' }), ' ', t('loading')))
+      }
+
+      function headerControls() {
+        return [
+          h('span', { className: 'pcp-title' }, t('panel')),
+          h('select', {
+            className: 'pcp-select',
+            value: project ?? '',
+            onChange: event => setProject(event.target.value),
+            'aria-label': t('pickProject'),
+          }, workspaces.map(workspace => h('option', { key: workspace.path, value: workspace.path }, workspace.title || workspace.path))),
+          h('button', { className: 'pcp-btn', onClick: () => load() }, loading ? `⟳ ${t('refresh')}` : t('refresh')),
+          h('label', { className: 'pcp-check' },
+            h('input', { type: 'checkbox', checked: auto, onChange: event => setAuto(event.target.checked) }),
+            t('auto')),
+        ]
+      }
+
+      return h('div', { className: 'pcp-page' }, h(Style, null),
+        h('div', { className: 'pcp-section' }, t('registryTitle')),
+        registryError !== null && h('p', { className: 'pcp-error' }, registryError),
+        registry !== null && h('div', null,
+          h('div', { className: 'pcp-note' }, `${t('registryStore')}: ${registry.storePath}`),
+          registry.malformed === true && h('p', { className: 'pcp-error' }, t('failed', { message: 'the store file is not valid JSON' })),
+          h('div', { style: { display: 'flex', gap: '2rem', flexWrap: 'wrap' } },
+            h('div', { style: { flex: '1 1 20rem' } },
+              h('div', { className: 'pcp-note', style: { fontWeight: 600 } }, `${t('blacklistTitle')} (${registry.declined.length})`),
+              registry.declined.length === 0
+                ? h('div', { className: 'pcp-note' }, t('registryEmpty'))
+                : h('ul', { className: 'pcp-list' }, registry.declined.map(row => RegistryRow({
+                  row, timeKey: 'declinedAt', t,
+                  removing: removing !== null && removing.list === 'declined' && removing.path === row.path,
+                  onRemove: () => removeRow('declined', row.path),
+                })))),
+            h('div', { style: { flex: '1 1 20rem' } },
+              h('div', { className: 'pcp-note', style: { fontWeight: 600 } }, `${t('whitelistTitle')} (${registry.allowed.length})`),
+              registry.allowed.length === 0
+                ? h('div', { className: 'pcp-note' }, t('registryEmpty'))
+                : h('ul', { className: 'pcp-list' }, registry.allowed.map(row => RegistryRow({
+                  row, timeKey: 'allowedAt', t,
+                  removing: removing !== null && removing.list === 'allowed' && removing.path === row.path,
+                  onRemove: () => removeRow('allowed', row.path),
+                  onView: () => toggleView(row.path),
+                  viewExpanded: viewPath === row.path,
+                  viewing: viewLoading && viewPath === row.path,
+                }))))),
+          h('p', { className: 'pcp-note' }, t('registryEditHint'))),
+          h('p', { className: 'pcp-note' }, t('registryRemoveHint')),
+          viewPath !== null && h('div', { className: 'pcp-viewbox' },
+            h('div', { className: 'pcp-section', style: { margin: '0 0 6px' } }, `${t('registryViewTitle')} · ${viewPath}`),
+            viewError !== null && h('p', { className: 'pcp-error' }, t('failed', { message: viewError })),
+            viewLoading && viewData === null && h('p', { className: 'pcp-note' }, h('span', { className: 'pcp-spinner' }), ' ', t('loading')),
+            viewData !== null && (viewData.indexExists === false
+              ? h('p', { className: 'pcp-note' }, t('registryNoIndex'))
+              : h(SnapshotView, { data: viewData, t, locale }))),
+        h(SnapshotView, { data, t, locale }))
     }
 
 

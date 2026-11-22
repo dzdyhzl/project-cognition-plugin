@@ -1,12 +1,13 @@
 #COGNITION-CODE-VOLUME: 1
 
 ===./===
+AGENTS.md[SS7S]: F:跨宿主工作区提示：三插件联合开发约定（依赖 ../shared/agents-block 与 ../shared/local-store、改动 shared/ 前评估 github-workbench 影响、gate 传感算法以 shared/session-gate 为权威）、提交习惯（单独提交，涉及 shared/ 注明模块指纹） | R:code:lib/templates.js,code:lib/registry.js,code:client.js | A:- | S:由本插件 cognition_init 默认写入并受管（project-cognition:start/end 定界块之外的头部内容由人工维护）；29 例测试数与 test/plugin.test.js 同步维护（现已 30 例）
 PLAN.md[SS7S]: F:设计决策记录：目标、已确认决策（简化复刻范围、触发方式、索引存放）、工具表、实施步骤与验收标准。 | R:- | A:PLAN.md（初始设计文档） | S:记录的是 v1 设计时点：未含后来加入的 Web 面板、cognition_registry 与数据库认知；与现状冲突时以 docs/DETAIL.md 和源码为准。
-README.md[SG6]: F:项目自述：原理、14 工具表、快速开始、测试、跨宿主集成（默认写块）、面板与边界 | R:- | A:- | S:版本徽章与 package.json 同步维护
-client.js[EU7]: F:面板 Web 界面：黑/白名单双列区块（每条 RegistryRow 带移出按钮，操作中禁用、完成后刷新名单）、统计卡、漂移/覆盖率徽章、chunk 计划、nextActions、验证结论、gate 对话框；pcp-page 自滚动容器 | R:code:panel.js | A:默认导出 client factory（id=@local/project-cognition） | S:移除经 registryRemove feature-detect，旧 Host 显示重载提示；gate 关闭按会话记忆（gateShownSessionId），切换会话仅清除可见提示；会话门控算法规范在 shared/session-gate，改传感逻辑需同步
+README.md[SG6]: F:项目自述：原理、14 工具表、快速开始、测试、跨宿主集成（默认写块）、面板（黑/白名单、移出、白名单条目查看该项目快照）与边界 | R:- | A:- | S:版本徽章与 package.json 同步维护（当前 1.22.0）
+client.js[EU7]: F:面板 Web 界面：黑/白名单双列区块（每条 RegistryRow 带移出按钮，操作中禁用、完成后刷新名单）、白名单条目「查看」按钮展开该项目的 panelData 快照（SnapshotView 复用主面板正文）、统计卡、漂移/覆盖率徽章、chunk 计划、nextActions、验证结论、gate 对话框；pcp-page 自滚动容器 | R:code:panel.js | A:默认导出 client factory（id=@local/project-cognition） | S:快照正文抽为 SnapshotView 组件（主面板与白名单展开视图共用）；同一行再点即收起，移出该行自动收起；移除经 registryRemove feature-detect；gate 关闭按会话记忆；门控算法规范在 shared/session-gate
 cordis.patch.yml[FG9T]: F:用户补丁层声明：把 project-cognition 插件与其面板服务插入当前运行配置，升级不丢。 | R:code:package.json | A:insert 两个 cordis 条目：project-cognition 与 project-cognition:panel | S:由 dsh bundle 机制加载（package.json 的 dsh.bundle.patch 指向此文件）；面板条目 id 带 :panel 后缀，指向 package.json exports 的 ./panel。
 index.js[AB9L]: F:注册全部 cognition_* 工具与系统提示段：overview（token+条目双门控、refreshThreshold）、init（默认向 AGENTS.md 写托管规则块，agents_md=false 跳过）、scan（覆盖率）、update/remove_entries（跨卷 database: 引用校验）、search（forward/reverse/impact 跨卷闭包）、database_init/scan、verify、snapshot/evolution、doctor、gate、registry；写路径以 assertUnchanged 守卫读-改-写窗口 | R:code:lib/format.js,code:lib/scanner.js,code:lib/state.js,code:lib/templates.js,code:lib/ddl.js,code:lib/registry.js,code:test/plugin.test.js | A:apply(ctx, config) 注册 14 个工具 | S:scan/update_entries/remove_entries/database_init 在写 state.json 或卷文件前用 readSnapshot+assertUnchanged 检测并发编辑，冲突时不写入任何内容并提示重跑；AGENTS.md 块缺省写入且块外内容零改动，显式 false 跳过
-package.json[FG5]: F:bundle 清单：包名 @local/project-cognition、版本、scripts.test、导出映射、DSH client/patch 声明 | R:code:cordis.patch.yml,code:test/plugin.test.js | A:- | S:exports 同时暴露 index/panel/client/locale/icon 五个入口；dsh.client.inject 依赖会话界面插件
+package.json[FG5]: F:bundle 清单：包名 @local/project-cognition、版本、scripts.test、导出映射、DSH client/patch 声明 | R:code:cordis.patch.yml,code:test/plugin.test.js | A:- | S:exports 同时暴露 index/panel/client/locale/icon 五个入口；dsh.client.inject 依赖会话界面插件；files 清单不含 AGENTS.md 与 .cognition
 panel.js[CG7]: F:面板 Host 服务：panelData 快照（卷摘要、漂移、覆盖率、chunk 计划、nextActions、verify）、sessionGate、gateDecision、registryList（名单只读快照+hasIndex 探测）、registryRemove（黑名单解除登记 / 白名单移出，经 declinedRemove/allowedRemove 原子写） | R:code:lib/format.js,code:lib/scanner.js,code:lib/state.js,code:lib/registry.js | A:panelData, sessionGate, gateDecision, registryList, registryRemove | S:registryRemove 仅支持移除（list 限 declined/allowed），新增仍走会话工具；无效 list 抛 project-cognition/invalid-list；重复移除返回 removed=false 不报错
 
 ===docs/===
@@ -25,4 +26,4 @@ en.json[SG4]: F:英文界面文案：插件元信息、14 个工具摘要、面�
 zh.json[SG4]: F:中文界面文案：插件元信息、14 个工具摘要、面板标签（含分块计划/下一步建议） | R:- | A:- | S:工具 summary 由 DSH 读取展示，改字段需同步 en.json；cognition_init 摘要已更新为“默认写 AGENTS.md 受管块，agents_md=false 跳过”
 
 ===test/===
-plugin.test.js[TG8]: F:回归测试套件（node:test，零依赖，29 例）：纯函数库 + 全部工具链路 + 面板服务 + DDL + 跨卷校验/impact + AGENTS.md 默认写入与 opt-out + assertUnchanged 并发守卫 | R:code:index.js,code:panel.js,code:lib/ddl.js,code:lib/registry.js,code:lib/state.js | A:npm test（node --test test/） | S:默认 init 后 AGENTS.md 成为受管文件——scan 计数 +1、coverage 分母含它；并发守卫测试模拟 state.json 在读-改-写窗口内被改后调用应失败
+plugin.test.js[TG8]: F:回归测试套件（node:test，零依赖，30 例）：纯函数库 + 全部工具链路 + 面板服务（含 panelData 按名单内路径取白名单项目快照、黑名单无索引返回 declined 态）+ DDL + 跨卷校验/impact + AGENTS.md 默认写入与 opt-out + assertUnchanged 并发守卫 | R:code:index.js,code:panel.js,code:lib/ddl.js,code:lib/registry.js,code:lib/state.js | A:npm test（node --test test/） | S:默认 init 后 AGENTS.md 成为受管文件——scan 计数 +1、coverage 分母含它；并发守卫测试模拟 state.json 在读-改-写窗口内被改后调用应失败；名单相关测试用 PROJECT_COGNITION_REGISTRY 隔离

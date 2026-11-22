@@ -642,6 +642,43 @@ test('panel: registryRemove lifts blacklist and removes whitelist entries', asyn
   }
 })
 
+test('panel: panelData serves any whitelist-listed project path (registry view source)', async () => {
+  const { default: PanelService } = await mod('panel.js')
+  const registry = await mod('lib/registry.js')
+  const regDir = await mkdtemp(join(tmpdir(), 'pcog-regview-'))
+  const previous = process.env.PROJECT_COGNITION_REGISTRY
+  process.env.PROJECT_COGNITION_REGISTRY = join(regDir, 'reg.json')
+  const root = await makeProject()
+  try {
+    const tools = await loadPlugin(root)
+    await tools.cognition_init.execute({}, { agent: 'test' })
+    await registry.allowedAdd(root, 'maintained')
+    const service = new PanelService({ reflect: { provide: () => {} } })
+
+    // the whitelist row viewer calls panelData with the listed path directly
+    const snap = await service.panelData({ project: root })
+    assert.equal(snap.indexExists, true)
+    assert.equal(snap.root, root)
+    assert.ok(Array.isArray(snap.codeEntries))
+    assert.ok(Array.isArray(snap.nextActions) && snap.nextActions.length > 0)
+    assert.ok(snap.chunkPlan !== null)
+    assert.equal(snap.chunkPlan.fullDelivery, true)
+
+    // a blacklisted project without an index reports the declined state instead
+    const declinedRoot = join(regDir, 'declined-view')
+    await mkdir(declinedRoot, { recursive: true })
+    await registry.declinedAdd(declinedRoot, 'no index wanted')
+    const declinedSnap = await service.panelData({ project: declinedRoot })
+    assert.equal(declinedSnap.indexExists, false)
+    assert.equal(declinedSnap.declined, true)
+    assert.equal(declinedSnap.declinedRemark, 'no index wanted')
+  } finally {
+    if (previous === undefined) delete process.env.PROJECT_COGNITION_REGISTRY
+    else process.env.PROJECT_COGNITION_REGISTRY = previous
+    await rm(root, { recursive: true, force: true })
+    await rm(regDir, { recursive: true, force: true })
+  }
+})
 test('tools: init writes the managed AGENTS.md block by default; agents_md=false skips it', async () => {
   // default: block written, with the mandatory maintenance line
   const root1 = await makeProject()
