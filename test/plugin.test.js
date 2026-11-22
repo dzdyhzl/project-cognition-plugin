@@ -663,3 +663,36 @@ test('tools: init writes the managed AGENTS.md block by default; agents_md=false
   await rm(root1, { recursive: true, force: true })
   await rm(root2, { recursive: true, force: true })
 })
+
+
+test('concurrency: assertUnchanged detects a concurrent state edit between load and save', async () => {
+  const { readSnapshot, assertUnchanged, loadState, saveState, emptyState, cognitionPaths } = stateMod
+  const root = await makeProject()
+  const paths = cognitionPaths(root)
+  await mkdir(paths.dir, { recursive: true })
+  await saveState(paths.state, emptyState('proj', 'en-US'))
+
+  // Session A snapshots and loads; session B saves a different state meanwhile.
+  const snapshotA = await readSnapshot(paths.state)
+  const stateA = await loadState(paths.state)
+  const sessionB = emptyState('proj', 'en-US')
+  sessionB.files['src/injected.js'] = { sha256: 'beef' }
+  await saveState(paths.state, sessionB)
+
+  // A's guarded save must refuse to clobber B's write.
+  stateA.pending = ['src/a.js']
+  await assert.rejects(
+    () => assertUnchanged(paths.state, snapshotA, 'state.json'),
+    /changed concurrently/,
+  )
+
+  // With no intervening edit the guard passes and the save goes through.
+  const snapshotC = await readSnapshot(paths.state)
+  const stateC = await loadState(paths.state)
+  stateC.pending = ['src/a.js']
+  await assertUnchanged(paths.state, snapshotC, 'state.json')
+  await saveState(paths.state, stateC)
+  const reread = await loadState(paths.state)
+  assert.deepEqual(reread.pending, ['src/a.js'])
+  await rm(root, { recursive: true, force: true })
+})

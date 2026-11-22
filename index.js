@@ -101,6 +101,8 @@ const evidencePath = state.evidencePath
 const loadState = state.loadState
 const emptyState = state.emptyState
 const saveState = state.saveState
+const readSnapshot = state.readSnapshot
+const assertUnchanged = state.assertUnchanged
 const addPending = state.addPending
 const removePending = state.removePending
 const addDatabasePending = state.addDatabasePending
@@ -518,6 +520,7 @@ export function apply(ctx, userConfig = {}) {
     async execute(args, exec) {
       const root = await resolveProjectRoot(ctx, exec.agent, args.project)
       const paths = cognitionPaths(root)
+      const stateRaw = await readSnapshot(paths.state)
       const state = await loadState(paths.state)
       if (state === null) {
         return { text: `No cognition state found under ${paths.dir}. Call cognition_init first.` }
@@ -533,6 +536,7 @@ export function apply(ctx, userConfig = {}) {
       // Rebuild the pending list from the current drift facts: stale entries from
       // earlier crashes or malformed writes (e.g. "(empty)") are dropped here.
       state.pending = work
+      await assertUnchanged(paths.state, stateRaw, 'state.json')
       await saveState(paths.state, state)
       const lines = []
       const coverage = scanner.coverageStats(inventory, state)
@@ -601,6 +605,7 @@ export function apply(ctx, userConfig = {}) {
       }
       const root = await resolveProjectRoot(ctx, exec.agent, args.project)
       const paths = cognitionPaths(root)
+      const stateRaw = await readSnapshot(paths.state)
       const state = await loadState(paths.state)
       if (state === null) {
         return { text: `No cognition state found under ${paths.dir}. Call cognition_init first.` }
@@ -699,6 +704,8 @@ export function apply(ctx, userConfig = {}) {
         accepted.push({ path: posixPath, tags: entry.tags, f: entry.f, r: entry.r, a: entry.a, s: entry.s })
       }
       fmt.upsertEntries(parsed.sections, new Map(accepted.map(entry => [entry.path, entry])))
+      await assertUnchanged(paths.state, stateRaw, 'state.json')
+      await assertUnchanged(volumeFile, volumeText, isDatabase ? 'the Database volume' : 'the Code volume')
       await fmt.atomicWriteText(volumeFile, isDatabase ? fmt.serializeDatabaseVolume(parsed.sections) : fmt.serializeCodeVolume(parsed.sections))
       // Record entry hashes and clear pending for accepted paths.
       const acceptedPaths = new Set(accepted.map(entry => entry.path))
@@ -724,6 +731,7 @@ export function apply(ctx, userConfig = {}) {
           .filter(entry => entry.path !== '(empty)' && entry.errors.every(error => !error.includes('does not exist')))
           .map(entry => entry.path))
       }
+      await assertUnchanged(paths.state, stateRaw, 'state.json')
       await saveState(paths.state, state)
       const lines = [`# cognition_update_entries (volume=${args.volume})`]
       lines.push(`accepted: ${accepted.length} | rejected: ${rejected.length}`)
@@ -767,9 +775,12 @@ export function apply(ctx, userConfig = {}) {
         return { text: isDatabase ? `No Database volume at ${paths.database}.` : `No Code volume at ${paths.code}.` }
       }
       const volumeText = await readFile(volumeFile, 'utf8')
+      const stateRaw = await readSnapshot(paths.state)
       const parsed = fmt.parseCodeVolume(volumeText)
       const wanted = (args.paths ?? []).map(path => String(path).replaceAll('\\', '/')).filter(Boolean)
       const removed = fmt.removeEntries(parsed.sections, wanted)
+      await assertUnchanged(paths.state, stateRaw, 'state.json')
+      await assertUnchanged(volumeFile, volumeText, isDatabase ? 'the Database volume' : 'the Code volume')
       await fmt.atomicWriteText(volumeFile, isDatabase ? fmt.serializeDatabaseVolume(parsed.sections) : fmt.serializeCodeVolume(parsed.sections))
       if (isDatabase) {
         for (const path of removed) delete state.database.tables[path]
@@ -781,6 +792,7 @@ export function apply(ctx, userConfig = {}) {
           if (state.files[path] !== undefined) delete state.files[path]
         }
       }
+      await assertUnchanged(paths.state, stateRaw, 'state.json')
       await saveState(paths.state, state)
       return {
         text: [
@@ -982,6 +994,7 @@ export function apply(ctx, userConfig = {}) {
       const args = { ...rawArgs, source_id: String(rawArgs.source_id ?? 'primary').trim() || 'primary', engine: rawArgs.engine ?? 'unknown' }
       const root = await resolveProjectRoot(ctx, exec.agent, args.project)
       const paths = cognitionPaths(root)
+      const stateRaw = await readSnapshot(paths.state)
       const state = await loadState(paths.state)
       if (state === null) return { text: `No cognition state found under ${paths.dir}. Call cognition_init first.` }
       const dumpAbs = isAbsolute(args.dump) ? args.dump : resolve(root, args.dump)
@@ -1034,6 +1047,7 @@ export function apply(ctx, userConfig = {}) {
         ? touchedTables
         : touchedTables.filter(identity => state.database.tables[identity].sha256 === undefined)
       addDatabasePending(state, pendingTables)
+      await assertUnchanged(paths.state, stateRaw, 'state.json')
       await saveState(paths.state, state)
       const lines = [
         `# cognition_database_init`,

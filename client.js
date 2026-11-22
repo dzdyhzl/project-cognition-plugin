@@ -690,6 +690,7 @@ window.__ModuleLoader__.load({
       const gateStore = createGateStore()
       const gateDismissed = new Set()
       let gateBusy = false
+      let gateShownSessionId
       const evaluateGate = async currentSession => {
         const snapshot = ctx.get('workspaces')?.list?.getSnapshot()
         const workspace = snapshot?.items?.find(item => item.sessionIds.includes(currentSession.id))
@@ -700,6 +701,7 @@ window.__ModuleLoader__.load({
         try {
           const result = await api.sessionGate({ project: path })
           if (result.allowed === true || result.declined === true || gateDismissed.has(path)) return
+          gateShownSessionId = currentSession.id
           gateStore.set({ path, busy: false, hasIndex: result.hasIndex === true })
         } catch {
           // Gate is best-effort: a failed probe never blocks the conversation.
@@ -708,7 +710,7 @@ window.__ModuleLoader__.load({
         }
       }
       const gateActions = {
-        close: gate => { gateDismissed.add(gate.path); gateStore.set(null) },
+        close: gate => { gateDismissed.add(gate.path); gateShownSessionId = undefined; gateStore.set(null) },
         accept: async gate => {
           gateStore.set({ ...gate, busy: true })
           try {
@@ -731,6 +733,8 @@ window.__ModuleLoader__.load({
         },
       }
       // The sessions list subscription is the activity sensor: the current
+      // Canonical algorithm lives at shared/session-gate/index.js (tested); keep
+      // this copy in sync when editing the sensor heuristics.
       // main-view session's first message moves updatedAt or starts running;
       // from then on the gate is evaluated exactly once for that session.
       ctx.effect(() => {
@@ -745,8 +749,13 @@ window.__ModuleLoader__.load({
           if (currentSession === undefined) { currentId = undefined; return }
           if (currentId !== currentSession.id) {
             // Conversation switch: drop a visible prompt silently (no list
-            // write, not dismissed) and re-baseline for the new session.
-            gateStore.set(null)
+            // write, not dismissed) and re-baseline for the new session. A
+            // prompt the user explicitly closed stays closed for this session
+            // (gateShownSessionId parity with github-workbench: remember-close).
+            if (gateShownSessionId !== undefined && gateShownSessionId !== currentSession.id) {
+              gateShownSessionId = undefined
+              gateStore.set(null)
+            }
             currentId = currentSession.id
             baselineUpdatedAt = currentSession.updatedAt
             baselineRunning = currentSession.running === true
