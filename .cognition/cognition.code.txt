@@ -2,20 +2,20 @@
 
 ===./===
 PLAN.md[SS7S]: F:设计决策记录：目标、已确认决策（简化复刻范围、触发方式、索引存放）、工具表、实施步骤与验收标准。 | R:- | A:PLAN.md（初始设计文档） | S:记录的是 v1 设计时点：未含后来加入的 Web 面板、cognition_registry 与数据库认知；与现状冲突时以 docs/DETAIL.md 和源码为准。
-README.md[SG6]: F:项目自述：原理、14 个工具表、快速开始、测试、跨宿主集成、面板（覆盖率/分块计划/下一步建议）与边界 | R:- | A:- | S:版本徽章与 package.json 同步维护
-client.js[EU7]: F:面板 Web 界面：工作区选择、统计卡、漂移/覆盖率徽章、chunk 计划行、nextActions 建议卡（clipboard 复制按钮）、待维护清单、数据库卷、验证结论、条目预览、gate 询问对话框 | R:code:panel.js | A:默认导出 client factory（id=@local/project-cognition） | S:NextActions 组件用 navigator.clipboard，失败静默降级为可选中文本；文案走 ctx.locale.bind {key} 占位符，zh/en 必须同步
+README.md[SG6]: F:项目自述：原理、14 个工具表、快速开始、测试、跨宿主集成、面板（名单展示/覆盖率/分块计划/下一步建议）与边界 | R:- | A:- | S:版本徽章与 package.json 同步维护
+client.js[EU7]: F:面板 Web 界面：工作区选择、统计卡、黑/白名单双列区块（路径、登记时间、备注、索引状态、编辑提示）、漂移/覆盖率徽章、chunk 计划、nextActions 建议卡、待维护清单、数据库卷、验证结论、gate 询问对话框 | R:code:panel.js | A:默认导出 client factory（id=@local/project-cognition） | S:名单是全局数据，随 load() 一并拉取并与 panelData 错误通道分离（registryError 独立展示）；文案 zh/en 必须同步
 cordis.patch.yml[FG9T]: F:用户补丁层声明：把 project-cognition 插件与其面板服务插入当前运行配置，升级不丢。 | R:code:package.json | A:insert 两个 cordis 条目：project-cognition 与 project-cognition:panel | S:由 dsh bundle 机制加载（package.json 的 dsh.bundle.patch 指向此文件）；面板条目 id 带 :panel 后缀，指向 package.json exports 的 ./panel。
 index.js[AB9L]: F:注册全部 cognition_* 工具与系统提示段：overview（token+条目双门控分块、refreshThreshold）、init（AGENTS.md 托管块）、scan（覆盖率）、update/remove_entries（跨卷 database: 引用校验）、search（forward/reverse/impact 跨卷闭包）、database_init（checks/列注释计数）、database_scan（evidence 细节摘要）、verify（跨卷引用校验）、snapshot/evolution、doctor、gate、registry | R:code:lib/format.js,code:lib/scanner.js,code:lib/state.js,code:lib/templates.js,code:lib/ddl.js,code:lib/registry.js,code:test/plugin.test.js | A:apply(ctx, config) 注册 14 个工具 | S:database_scan 的 evidence detail 行引导模型在表级 FRAS 的 S/F 字段引用 CHECK 与列注释等非显而易见语义
 package.json[FG5]: F:bundle 清单：包名 @local/project-cognition、版本、scripts.test、导出映射、DSH client/patch 声明 | R:code:cordis.patch.yml,code:test/plugin.test.js | A:- | S:exports 同时暴露 index/panel/client/locale/icon 五个入口；dsh.client.inject 依赖会话界面插件
-panel.js[CG7]: F:只读面板 Host 服务：panelData 快照（卷摘要、漂移、覆盖率、token 规模、chunk 计划、nextActions 下一步建议、数据库 evidence、verify）、sessionGate 名单事实、gateDecision 写名单 | R:code:lib/format.js,code:lib/scanner.js,code:lib/state.js,code:lib/registry.js | A:panelData, sessionGate, gateDecision | S:nextActions 由快照事实确定性推导（待维护/漂移/违规数），无索引路径提前返回不带此字段；chunkPlan 与 overview 共用估算器；Typert Remote 直连
+panel.js[CG7]: F:只读面板 Host 服务：panelData 快照（卷摘要、漂移、覆盖率、token 规模、chunk 计划、nextActions、数据库 evidence、verify）、sessionGate、gateDecision、registryList（黑/白名单只读快照：路径/时间/备注/hasIndex） | R:code:lib/format.js,code:lib/scanner.js,code:lib/state.js,code:lib/registry.js | A:panelData, sessionGate, gateDecision, registryList | S:registryList 经 registry.readStore 读双名单并对每条 path 探测 .cognition/cognition.txt 是否存在（hasIndex）；store 不可读时抛 project-cognition/registry-unreadable
 
 ===docs/===
-DETAIL.md[SG6]: F:中文详细文档：功能清单、索引文件布局、使用建议与边界 | R:code:index.js | A:- | S:与 README 保持同步；含 database_scan evidence 细节、列注释采集、CHECK 约束、跨卷影响分析、token 预算门控等说明
+DETAIL.md[SG6]: F:中文详细文档：功能清单、索引文件布局、使用建议与边界 | R:code:index.js | A:- | S:与 README 保持同步；含名单显式展示、database_scan evidence 细节、列注释采集、跨卷影响分析等说明
 
 ===lib/===
 ddl.js[CG8]: F:DDL 解析为 Schema Evidence：CREATE TABLE 内联约束 + pg_dump 分离语句折叠（PK/UNIQUE/FOREIGN KEY/CHECK、CREATE [UNIQUE] INDEX），CHECK 解析为 checks 字段，列注释采集（MySQL 内联 COMMENT + PostgreSQL COMMENT ON COLUMN） | R:code:index.js,code:test/plugin.test.js | A:parseDdl(text, { sourceId, engine })；table.checks: { name?, expression }；columns[].comment | S:COMMENT ON 列名正则须容忍 schema 限定三段名（[^\s(]+\.[^\s(]+?\s+is）；parseColumnList 期望带括号子句；不匹配的列注释显式告警
 format.js[CG8]: F:索引纯文本协议核心：Root/Meta 解析、标签字典与 S 配额解析、FRAS 校验、分卷序列化/上Upsert/删除、原子写入、token 估算 | R:- | A:parseCodeVolume, validateEntry, upsertEntries, removeEntries, serializeCodeVolume, serializeDatabaseVolume, atomicWriteText, estimateTokens | S:estimateTokens 按 CJK/1.5 其余/4 粗估，仅用于分块预算不是计费值；无法识别的行原样保留进 extras
-registry.js[CG7]: F:白/黑名单持久注册表：互斥双清单、Windows 稳定路径键、原子写、读-改-写锁窗口 | R:code:index.js,code:test/plugin.test.js | A:allowedAdd, allowedRemove, declinedAdd, declinedRemove, allowedFor, declinedFor, listAllowed, listDeclined, registryPath | S:registryPath 支持 PROJECT_COGNITION_REGISTRY 环境变量覆盖（测试隔离）；锁文件超 15s 视为弃置
+registry.js[CG7]: F:白/黑名单持久注册表：互斥双清单、Windows 稳定路径键、原子写、读-改-写锁窗口；sanitizeRow 保留 allowedAt | R:code:index.js,code:panel.js,code:test/plugin.test.js | A:allowedAdd, allowedRemove, declinedAdd, declinedRemove, allowedFor, declinedFor, listAllowed, listDeclined, registryPath | S:sanitizeRow 原先丢弃 allowedAt 导致面板白名单无时间——已补；PROJECT_COGNITION_REGISTRY 可覆盖存储路径
 scanner.js[CG8]: F:受管文件清点（gitignore/.cognitionignore 迷你匹配器、嵌套作用域）、SHA-256 哈希与行数统计、漂移比对、覆盖率统计 coverageStats | R:- | A:scanInventory, hashFiles, compareDrift, coverageStats, sha256, ALWAYS_SKIP | S:行数按 \n 计且末行无换行不丢；覆盖率把已删文件条目单独记 missingEntries
 state.js[PD8S]: F:state.json 机器状态：受管文件哈希、条目哈希、数据库 source/evidence 记录与待办清单的读写，支撑增量维护与中断续建。 | R:code:lib/format.js | A:STATE_VERSION、cognitionPaths、evidencePath、loadState/saveState、emptyState、addPending/removePending、addDatabasePending/removeDatabasePending | S:v1 状态文件加载时静默升级到 v2（补 database 段）；state.json 由 .cognition/.gitignore 排除，不随 Git 版本化。
 templates.js[CG7]: F:分卷骨架与 AGENTS.md 托管块模板：zh/en 标签字典、Root/Meta/Code/Database 卷文本、COGNITION_GITIGNORE、agentsBlock/upsertAgentsBlock/hasAgentsBlock | R:code:index.js | A:volumeTemplates, agentsBlock, upsertAgentsBlock, hasAgentsBlock, AGENTS_MARKERS, COGNITION_GITIGNORE | S:托管块用 project-cognition:start/end 前缀定界（写入行带注释后缀），end 用 lastIndexOf 塌缩重复块；块外用户内容零改动
@@ -25,4 +25,4 @@ en.json[SG4]: F:英文界面文案：插件元信息、14 个工具摘要、面�
 zh.json[SG4]: F:中文界面文案：插件元信息、14 个工具摘要、面板标签（含分块计划/下一步建议） | R:- | A:- | S:工具 summary 由 DSH 读取展示，改字段需同步 en.json
 
 ===test/===
-plugin.test.js[TG8]: F:回归测试套件（node:test，零依赖，25 例）：纯函数库 + 全部 cognition_* 工具链路 + 面板服务 + DDL 解析 + 跨卷引用/impact + database_scan evidence 细节 | R:code:index.js,code:panel.js,code:lib/ddl.js | A:npm test（node --test test/） | S:gate/registry 测试经 PROJECT_COGNITION_REGISTRY 隔离；database_scan 断言 evidence detail 计数行
+plugin.test.js[TG8]: F:回归测试套件（node:test，零依赖，26 例）：纯函数库 + 全部工具链路 + 面板服务 + DDL + 跨卷校验/impact + registryList 名单展示 | R:code:index.js,code:panel.js,code:lib/ddl.js,code:lib/registry.js | A:npm test（node --test test/） | S:registryList 测试断言空店、黑名单备注/无索引、白名单 hasIndex 探测与 storePath/malformed

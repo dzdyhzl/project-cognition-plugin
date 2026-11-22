@@ -14,6 +14,7 @@
 - **token 预算门控**：overview 的整卷交付门槛除条目数（默认 400）外还检查估算 token（默认 7000）；密集条目虽少也会建议分块，与 AOCI 的 chunk_tokens 交付模型一致。
 - **跨卷引用校验**：code 条目的 R 可以写 `database:schema.table`（代码↔数据库强关系）；update_entries 与 verify 会把这类引用对照已导入的 Schema Evidence 验证，指向未声明表的引用被拒绝或计为违规；项目未声明数据库源时不启用此检查。
 - **DDL 解析增强**：`cognition_database_init` 的解析器除 CREATE TABLE 内联约束外，还折叠 pg_dump 输出的分离语句——ALTER TABLE x ADD CONSTRAINT（PRIMARY KEY / UNIQUE / FOREIGN KEY ... REFERENCES）、MySQL 的 ALTER TABLE ADD PRIMARY KEY/KEY/UNIQUE，以及 CREATE [UNIQUE] INDEX ... ON x（USING btree 兼容）；CHECK 约束（内联或 ALTER 分离、具名/匿名）解析为 evidence 的 checks 字段（{ name?, expression }），供表级 FRAS 的 S 字段引用；列注释同样采集——MySQL 内联 `COMMENT '...'` 与 PostgreSQL 分离的 `COMMENT ON COLUMN x IS '...'`（schema 限定名、转义引号兼容），database_init 摘要报告列注释数，供表级 F/A 撰写引用列语义；表引用支持裸名、schema 限定名与引号形式。
+- **名单显式展示**：面板新增黑/白名单区块，逐条显示登记路径、时间、备注与该项目的索引状态，并标注名单存储路径；面板严格只读，名单修改仍通过会话中的 `cognition_registry` 完成。
 - **下一步建议**：面板按快照事实（待维护数、漂移数、校验违规）确定性推导现在该输入给 AI 的指令，一键复制；索引已对齐时提示正常开发即可。对应 AOCI 面板的“推荐输入”。
 - **面板分块计划**：面板与 overview 使用同一个 token 估算器计算当前索引需要的分块交付数（默认 7000 token/块预算），展示整卷一次交付还是分几块。
 - **回归测试**：`test/plugin.test.js`（node:test，零依赖）覆盖纯函数库（format/scanner/state/ddl/templates）与全部 cognition_* 工具的 mock-ctx 端到端链路；注册表经环境变量隔离，可安全重复运行。

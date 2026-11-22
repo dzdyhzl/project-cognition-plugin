@@ -357,6 +357,43 @@ export class ProjectCognitionPanelService extends PanelServiceBase {
    * project, decline blacklists it. The registry enforces mutual exclusion.
    * @param request { project: string, accept: boolean, remark?: string }
    */
+  /**
+   * Read-only snapshot of the project registry: the declined (blacklist) and
+   * allowed (whitelist) rows with their timestamps and remarks, plus whether
+   * each project currently has a cognition index. Nothing here writes.
+   * @param request unused (kept for the remote-method shape)
+   */
+  async registryList(request) {
+    let store
+    try {
+      store = registry.readStore()
+    } catch (error) {
+      throw new RemoteError('project-cognition/registry-unreadable', error.message, {})
+    }
+    const decorate = async (rows) => {
+      const out = []
+      for (const row of rows) {
+        if (typeof row.path !== 'string' || row.path.length === 0) continue
+        let hasIndex = false
+        try { hasIndex = await fileExists(stateModule.cognitionPaths(row.path).root) } catch { /* best effort */ }
+        out.push({
+          path: row.path,
+          declinedAt: row.declinedAt,
+          allowedAt: row.allowedAt,
+          remark: row.remark ?? '',
+          hasIndex,
+        })
+      }
+      return out
+    }
+    return {
+      declined: await decorate(registry.listDeclined(store)),
+      allowed: await decorate(registry.listAllowed(store)),
+      storePath: registry.registryPath(),
+      malformed: store.malformed === true,
+    }
+  }
+
   async gateDecision(request) {
     const project = String(request?.project ?? '').trim()
     if (project.length === 0) throw new RemoteError('project-cognition/invalid-project', 'a project directory is required', {})
@@ -388,6 +425,7 @@ function markRemote(target, method) {
 markRemote(ProjectCognitionPanelService.prototype, 'panelData')
 markRemote(ProjectCognitionPanelService.prototype, 'sessionGate')
 markRemote(ProjectCognitionPanelService.prototype, 'gateDecision')
+markRemote(ProjectCognitionPanelService.prototype, 'registryList')
 
 export default ProjectCognitionPanelService
 

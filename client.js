@@ -59,6 +59,15 @@ window.__ModuleLoader__.load({
       chunkPlanFull: '整卷一次交付',
       chunkPlanMulti: '{chunks} 块交付（预算 {budget} token/块）',
       nextTitle: '下一步建议',
+      registryTitle: '项目名单（黑/白名单）',
+      blacklistTitle: '黑名单（不建索引）',
+      whitelistTitle: '白名单（建/维护索引）',
+      registryEmpty: '（空）',
+      registryRemark: '备注',
+      registryNoIndex: '尚无索引',
+      registryHasIndex: '已有索引',
+      registryStore: '名单存储',
+      registryEditHint: '名单修改请在会话中调用 cognition_registry（list / whitelist / unwhitelist / decline / allow）。',
       copied: '已复制',
       coverageFiles: '文件',
       coverageLines: '行',
@@ -116,6 +125,15 @@ window.__ModuleLoader__.load({
       chunkPlanFull: 'single delivery',
       chunkPlanMulti: '{chunks} chunks ({budget} tokens each)',
       nextTitle: 'Suggested next input',
+      registryTitle: 'Project lists (black/whitelist)',
+      blacklistTitle: 'Blacklist (no index)',
+      whitelistTitle: 'Whitelist (build/maintain index)',
+      registryEmpty: '(empty)',
+      registryRemark: 'remark',
+      registryNoIndex: 'no index yet',
+      registryHasIndex: 'index exists',
+      registryStore: 'store',
+      registryEditHint: 'Edit the lists in a session via cognition_registry (list / whitelist / unwhitelist / decline / allow).',
       copied: 'Copied',
       coverageFiles: 'files',
       coverageLines: 'lines',
@@ -219,6 +237,8 @@ window.__ModuleLoader__.load({
       const [data, setData] = useState(null)
       const [error, setError] = useState(null)
       const [loading, setLoading] = useState(false)
+      const [registry, setRegistry] = useState(null)
+      const [registryError, setRegistryError] = useState(null)
       const [auto, setAuto] = useState(true)
       const projectRef = useRef(project)
       projectRef.current = project
@@ -235,6 +255,13 @@ window.__ModuleLoader__.load({
           setError(cause?.message ?? String(cause))
         } finally {
           setLoading(false)
+        }
+        // Registry lists are global (not per project); fetch once alongside.
+        try {
+          setRegistry(await api.registryList({}))
+          setRegistryError(null)
+        } catch (cause) {
+          setRegistryError(cause?.message ?? String(cause))
         }
       }, [api])
 
@@ -296,7 +323,29 @@ window.__ModuleLoader__.load({
       }
 
       return h('div', { className: 'pcp-page' }, h(Style, null),
-        h('div', { className: 'pcp-header' }, headerControls()),
+        h('div', { className: 'pcp-section' }, t('registryTitle')),
+        registryError !== null && h('p', { className: 'pcp-error' }, registryError),
+        registry !== null && h('div', null,
+          h('div', { className: 'pcp-note' }, `${t('registryStore')}: ${registry.storePath}`),
+          registry.malformed === true && h('p', { className: 'pcp-error' }, t('failed', { message: 'the store file is not valid JSON' })),
+          h('div', { style: { display: 'flex', gap: '2rem', flexWrap: 'wrap' } },
+            h('div', { style: { flex: '1 1 20rem' } },
+              h('div', { className: 'pcp-note', style: { fontWeight: 600 } }, `${t('blacklistTitle')} (${registry.declined.length})`),
+              registry.declined.length === 0
+                ? h('div', { className: 'pcp-note' }, t('registryEmpty'))
+                : h('ul', { className: 'pcp-list' }, registry.declined.map(row => h('li', { key: row.path, className: 'pcp-entry' },
+                  h('div', null, row.path),
+                  h('div', { className: 'pcp-note' },
+                    `${row.declinedAt ? row.declinedAt.slice(0, 10) : '?'}${row.remark ? ' · ' + t('registryRemark') + ': ' + row.remark : ''} · ${row.hasIndex ? t('registryHasIndex') : t('registryNoIndex')}`))))),
+            h('div', { style: { flex: '1 1 20rem' } },
+              h('div', { className: 'pcp-note', style: { fontWeight: 600 } }, `${t('whitelistTitle')} (${registry.allowed.length})`),
+              registry.allowed.length === 0
+                ? h('div', { className: 'pcp-note' }, t('registryEmpty'))
+                : h('ul', { className: 'pcp-list' }, registry.allowed.map(row => h('li', { key: row.path, className: 'pcp-entry' },
+                  h('div', null, row.path),
+                  h('div', { className: 'pcp-note' },
+                    `${row.allowedAt ? row.allowedAt.slice(0, 10) : '?'}${row.remark ? ' · ' + t('registryRemark') + ': ' + row.remark : ''} · ${row.hasIndex ? t('registryHasIndex') : t('registryNoIndex')}`)))))),
+          h('p', { className: 'pcp-note' }, t('registryEditHint'))),
         h('div', { className: 'pcp-cards' },
           h(StatCard, { num: data.volumes?.code?.entries ?? 0, label: t('codeEntries') }),
           h(StatCard, { num: data.volumes?.database?.entries ?? 0, label: t('dbEntries') }),
@@ -511,6 +560,9 @@ window.__ModuleLoader__.load({
         'projectCognitionPanel/gateDecision': method('projectCognitionPanel',
           'Record the user\'s gate answer: accept whitelists the project, decline blacklists it (mutually exclusive lists).',
           [{ name: 'request', description: '{ project: absolute directory, accept: boolean, remark?: string }.', source: 'json', codec: requestJson }]),
+        'projectCognitionPanel/registryList': method('projectCognitionPanel',
+          'Read-only registry snapshot: declined (blacklist) and allowed (whitelist) rows with timestamps, remarks, and index presence.',
+          [{ name: 'request', description: 'unused.', source: 'json', codec: requestJson }]),
       },
     }
 

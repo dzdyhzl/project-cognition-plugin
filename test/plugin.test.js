@@ -565,3 +565,37 @@ test('tools: database_scan reports checks and column comment counts from evidenc
   assert.match(scan.text, /cite these in table FRAS/)
   await rm(root, { recursive: true, force: true })
 })
+
+test('panel: registryList exposes blacklist and whitelist with index presence', async () => {
+  const { default: PanelService } = await mod('panel.js')
+  const registry = await mod('lib/registry.js')
+  const regDir = await mkdtemp(join(tmpdir(), 'pcog-reglist-'))
+  const previous = process.env.PROJECT_COGNITION_REGISTRY
+  process.env.PROJECT_COGNITION_REGISTRY = join(regDir, 'reg.json')
+  try {
+    const service = new PanelService({ reflect: { provide: () => {} } })
+    const empty = await service.registryList({})
+    assert.deepEqual(empty.declined, [])
+    assert.deepEqual(empty.allowed, [])
+
+    await registry.declinedAdd(join(regDir, 'declined-demo'), '不想建索引')
+    const withIndex = join(regDir, 'allowed-demo')
+    await mkdir(join(withIndex, '.cognition'), { recursive: true })
+    await writeFile(join(withIndex, '.cognition', 'cognition.txt'), '#COGNITION-ROOT-MANIFEST: 1\n', 'utf8')
+    await registry.allowedAdd(withIndex, '')
+    const snap = await service.registryList({})
+    assert.equal(snap.declined.length, 1)
+    assert.equal(snap.declined[0].path, join(regDir, 'declined-demo'))
+    assert.equal(snap.declined[0].remark, '不想建索引')
+    assert.equal(snap.declined[0].hasIndex, false)
+    const allowedRow = snap.allowed.find(row => row.path === withIndex)
+    assert.ok(allowedRow, 'allowed row present')
+    assert.equal(allowedRow.hasIndex, true)
+    assert.equal(typeof snap.storePath, 'string')
+    assert.equal(snap.malformed, false)
+  } finally {
+    if (previous === undefined) delete process.env.PROJECT_COGNITION_REGISTRY
+    else process.env.PROJECT_COGNITION_REGISTRY = previous
+    await rm(regDir, { recursive: true, force: true })
+  }
+})
