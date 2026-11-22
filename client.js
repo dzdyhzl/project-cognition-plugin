@@ -153,8 +153,8 @@ window.__ModuleLoader__.load({
     // ------------------------------------------------------------------ styles
 
     const CSS = `
-.pcp-page { max-width: 860px; margin: 0 auto; padding: 16px 20px calc(24px + var(--dsh-frame-top-clearance, 0px));
-  color: var(--dsw-alias-label-primary); font-size: 13px; }
+.pcp-page { height: 100%; box-sizing: border-box; max-width: 860px; width: 100%; margin: 0 auto; padding: 16px 20px calc(24px + var(--dsh-frame-top-clearance, 0px));
+  color: var(--dsw-alias-label-primary); font-size: 13px; overflow-y: auto; overscroll-behavior: contain; flex: 1 1 auto; min-height: 0; }
 .pcp-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-top: var(--dsh-frame-top-clearance, 0px); }
 .pcp-title { font-size: 15px; font-weight: 600; margin-right: auto; }
 .pcp-select { border: 0.5px solid var(--dsw-alias-border-l3); border-radius: var(--dsw-radius-md, 6px);
