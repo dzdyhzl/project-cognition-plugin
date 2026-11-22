@@ -599,3 +599,44 @@ test('panel: registryList exposes blacklist and whitelist with index presence', 
     await rm(regDir, { recursive: true, force: true })
   }
 })
+
+test('panel: registryRemove lifts blacklist and removes whitelist entries', async () => {
+  const { default: PanelService } = await mod('panel.js')
+  const registry = await mod('lib/registry.js')
+  const regDir = await mkdtemp(join(tmpdir(), 'pcog-regrm-'))
+  const previous = process.env.PROJECT_COGNITION_REGISTRY
+  process.env.PROJECT_COGNITION_REGISTRY = join(regDir, 'reg.json')
+  try {
+    const service = new PanelService({ reflect: { provide: () => {} } })
+    const blacklisted = join(regDir, 'blacklisted')
+    const whitelisted = join(regDir, 'whitelisted')
+    await registry.declinedAdd(blacklisted, 'nope')
+    await registry.allowedAdd(whitelisted, '')
+
+    // remove from blacklist via the panel method
+    const lift = await service.registryRemove({ list: 'declined', project: blacklisted })
+    assert.equal(lift.removed, true)
+    const afterLift = await service.registryList({})
+    assert.equal(afterLift.declined.length, 0)
+
+    // remove from whitelist
+    const removeAllowed = await service.registryRemove({ list: 'allowed', project: whitelisted })
+    assert.equal(removeAllowed.removed, true)
+    const afterRemove = await service.registryList({})
+    assert.equal(afterRemove.allowed.length, 0)
+
+    // removing a second time reports removed=false (no error)
+    const repeat = await service.registryRemove({ list: 'allowed', project: whitelisted })
+    assert.equal(repeat.removed, false)
+
+    // invalid list is rejected
+    await assert.rejects(
+      () => service.registryRemove({ list: 'bogus', project: whitelisted }),
+      error => error.code === 'project-cognition/invalid-list',
+    )
+  } finally {
+    if (previous === undefined) delete process.env.PROJECT_COGNITION_REGISTRY
+    else process.env.PROJECT_COGNITION_REGISTRY = previous
+    await rm(regDir, { recursive: true, force: true })
+  }
+})

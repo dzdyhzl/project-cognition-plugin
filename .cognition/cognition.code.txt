@@ -2,15 +2,15 @@
 
 ===./===
 PLAN.md[SS7S]: F:设计决策记录：目标、已确认决策（简化复刻范围、触发方式、索引存放）、工具表、实施步骤与验收标准。 | R:- | A:PLAN.md（初始设计文档） | S:记录的是 v1 设计时点：未含后来加入的 Web 面板、cognition_registry 与数据库认知；与现状冲突时以 docs/DETAIL.md 和源码为准。
-README.md[SG6]: F:项目自述：原理、14 个工具表、快速开始、测试、跨宿主集成、面板（名单展示/覆盖率/分块计划/下一步建议）与边界 | R:- | A:- | S:版本徽章与 package.json 同步维护
-client.js[EU7]: F:面板 Web 界面：黑/白名单双列区块（registryList 缺失时降级为重载提示）、统计卡、漂移/覆盖率徽章、chunk 计划、nextActions、待维护清单、数据库卷、验证结论、gate 对话框；pcp-page 自滚动容器 | R:code:panel.js | A:默认导出 client factory（id=@local/project-cognition） | S:registryList 走 typeof feature-detect：旧 Host 未重载时显示提示而非让 load() 抛错；api 对象与 load 的编辑必须同批提交（此前分开编辑导致 api 行丢失）
+README.md[SG6]: F:项目自述：原理、14 工具表、快速开始、测试、跨宿主集成、面板（名单展示与移出）与边界 | R:- | A:- | S:版本徽章与 package.json 同步维护；面板不再表述为完全只读
+client.js[EU7]: F:面板 Web 界面：黑/白名单双列区块（每条 RegistryRow 带移出按钮，操作中禁用、完成后刷新名单）、统计卡、漂移/覆盖率徽章、chunk 计划、nextActions、验证结论、gate 对话框；pcp-page 自滚动容器 | R:code:panel.js | A:默认导出 client factory（id=@local/project-cognition） | S:移除经 registryRemove feature-detect，旧 Host 显示重载提示；removing 状态按 list+path 定位禁用单行按钮；removal 成功后重拉 registryList
 cordis.patch.yml[FG9T]: F:用户补丁层声明：把 project-cognition 插件与其面板服务插入当前运行配置，升级不丢。 | R:code:package.json | A:insert 两个 cordis 条目：project-cognition 与 project-cognition:panel | S:由 dsh bundle 机制加载（package.json 的 dsh.bundle.patch 指向此文件）；面板条目 id 带 :panel 后缀，指向 package.json exports 的 ./panel。
 index.js[AB9L]: F:注册全部 cognition_* 工具与系统提示段：overview（token+条目双门控分块、refreshThreshold）、init（AGENTS.md 托管块）、scan（覆盖率）、update/remove_entries（跨卷 database: 引用校验）、search（forward/reverse/impact 跨卷闭包）、database_init（checks/列注释计数）、database_scan（evidence 细节摘要）、verify（跨卷引用校验）、snapshot/evolution、doctor、gate、registry | R:code:lib/format.js,code:lib/scanner.js,code:lib/state.js,code:lib/templates.js,code:lib/ddl.js,code:lib/registry.js,code:test/plugin.test.js | A:apply(ctx, config) 注册 14 个工具 | S:database_scan 的 evidence detail 行引导模型在表级 FRAS 的 S/F 字段引用 CHECK 与列注释等非显而易见语义
 package.json[FG5]: F:bundle 清单：包名 @local/project-cognition、版本、scripts.test、导出映射、DSH client/patch 声明 | R:code:cordis.patch.yml,code:test/plugin.test.js | A:- | S:exports 同时暴露 index/panel/client/locale/icon 五个入口；dsh.client.inject 依赖会话界面插件
-panel.js[CG7]: F:只读面板 Host 服务：panelData 快照（卷摘要、漂移、覆盖率、token 规模、chunk 计划、nextActions、数据库 evidence、verify）、sessionGate、gateDecision、registryList（黑/白名单只读快照：路径/时间/备注/hasIndex） | R:code:lib/format.js,code:lib/scanner.js,code:lib/state.js,code:lib/registry.js | A:panelData, sessionGate, gateDecision, registryList | S:registryList 经 registry.readStore 读双名单并对每条 path 探测 .cognition/cognition.txt 是否存在（hasIndex）；store 不可读时抛 project-cognition/registry-unreadable
+panel.js[CG7]: F:面板 Host 服务：panelData 快照（卷摘要、漂移、覆盖率、chunk 计划、nextActions、verify）、sessionGate、gateDecision、registryList（名单只读快照+hasIndex 探测）、registryRemove（黑名单解除登记 / 白名单移出，经 declinedRemove/allowedRemove 原子写） | R:code:lib/format.js,code:lib/scanner.js,code:lib/state.js,code:lib/registry.js | A:panelData, sessionGate, gateDecision, registryList, registryRemove | S:registryRemove 仅支持移除（list 限 declined/allowed），新增仍走会话工具；无效 list 抛 project-cognition/invalid-list；重复移除返回 removed=false 不报错
 
 ===docs/===
-DETAIL.md[SG6]: F:中文详细文档：功能清单、索引文件布局、使用建议与边界 | R:code:index.js | A:- | S:与 README 保持同步；含名单显式展示、database_scan evidence 细节、列注释采集、跨卷影响分析等说明
+DETAIL.md[SG6]: F:中文详细文档：功能清单、索引文件布局、使用建议与边界 | R:code:index.js | A:- | S:与 README 保持同步；面板除名单移除外只读的表述已更新
 
 ===lib/===
 ddl.js[CG8]: F:DDL 解析为 Schema Evidence：CREATE TABLE 内联约束 + pg_dump 分离语句折叠（PK/UNIQUE/FOREIGN KEY/CHECK、CREATE [UNIQUE] INDEX），CHECK 解析为 checks 字段，列注释采集（MySQL 内联 COMMENT + PostgreSQL COMMENT ON COLUMN） | R:code:index.js,code:test/plugin.test.js | A:parseDdl(text, { sourceId, engine })；table.checks: { name?, expression }；columns[].comment | S:COMMENT ON 列名正则须容忍 schema 限定三段名（[^\s(]+\.[^\s(]+?\s+is）；parseColumnList 期望带括号子句；不匹配的列注释显式告警
@@ -25,4 +25,4 @@ en.json[SG4]: F:英文界面文案：插件元信息、14 个工具摘要、面�
 zh.json[SG4]: F:中文界面文案：插件元信息、14 个工具摘要、面板标签（含分块计划/下一步建议） | R:- | A:- | S:工具 summary 由 DSH 读取展示，改字段需同步 en.json
 
 ===test/===
-plugin.test.js[TG8]: F:回归测试套件（node:test，零依赖，26 例）：纯函数库 + 全部工具链路 + 面板服务 + DDL + 跨卷校验/impact + registryList 名单展示 | R:code:index.js,code:panel.js,code:lib/ddl.js,code:lib/registry.js | A:npm test（node --test test/） | S:registryList 测试断言空店、黑名单备注/无索引、白名单 hasIndex 探测与 storePath/malformed
+plugin.test.js[TG8]: F:回归测试套件（node:test，零依赖，27 例）：纯函数库 + 全部工具链路 + 面板服务（registryList/registryRemove）+ DDL + 跨卷校验/impact | R:code:index.js,code:panel.js,code:lib/ddl.js,code:lib/registry.js | A:npm test（node --test test/） | S:registryRemove 测试覆盖黑名单解除、白名单移出、重复移除 removed=false、无效 list 抛 invalid-list

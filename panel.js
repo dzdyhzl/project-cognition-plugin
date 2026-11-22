@@ -394,6 +394,25 @@ export class ProjectCognitionPanelService extends PanelServiceBase {
     }
   }
 
+  /**
+   * Remove one project from a registry list, directly from the panel.
+   * list='declined' lifts a blacklist record (registry allow);
+   * list='allowed' removes a whitelist record (registry unwhitelist).
+   * Adding entries stays session-only via cognition_gate / cognition_registry.
+   * @param request { list: 'declined'|'allowed', project: string }
+   */
+  async registryRemove(request) {
+    const list = request?.list === 'allowed' ? 'allowed' : request?.list === 'declined' ? 'declined' : undefined
+    const project = String(request?.project ?? '').trim()
+    if (list === undefined) throw new RemoteError('project-cognition/invalid-list', "list must be 'declined' or 'allowed'", {})
+    if (project.length === 0) throw new RemoteError('project-cognition/invalid-project', 'a project directory is required', {})
+    const root = isAbsolute(project) ? project : resolve(project)
+    const result = list === 'declined'
+      ? await registry.declinedRemove(root)
+      : await registry.allowedRemove(root)
+    return { project: root, list, removed: result.removed === true }
+  }
+
   async gateDecision(request) {
     const project = String(request?.project ?? '').trim()
     if (project.length === 0) throw new RemoteError('project-cognition/invalid-project', 'a project directory is required', {})
@@ -426,6 +445,7 @@ markRemote(ProjectCognitionPanelService.prototype, 'panelData')
 markRemote(ProjectCognitionPanelService.prototype, 'sessionGate')
 markRemote(ProjectCognitionPanelService.prototype, 'gateDecision')
 markRemote(ProjectCognitionPanelService.prototype, 'registryList')
+markRemote(ProjectCognitionPanelService.prototype, 'registryRemove')
 
 export default ProjectCognitionPanelService
 

@@ -67,7 +67,12 @@ window.__ModuleLoader__.load({
       registryNoIndex: '尚无索引',
       registryHasIndex: '已有索引',
       registryStore: '名单存储',
-      registryEditHint: '名单修改请在会话中调用 cognition_registry（list / whitelist / unwhitelist / decline / allow）。',
+      registryEditHint: '名单新增仍请在会话中调用 cognition_registry（whitelist / decline）；此处可直接移出成员。',
+      registryRemove: '移出',
+      registryRemoving: '移除中…',
+      registryRemoved: '已移出名单',
+      registryRemoveFailed: '移除失败',
+      registryRemoveHint: '点击条目右侧的移出按钮可直接将该路径移出名单（黑名单=解除登记，白名单=移出白名单）；新增仍需在会话中完成。',
       copied: '已复制',
       coverageFiles: '文件',
       coverageLines: '行',
@@ -133,7 +138,12 @@ window.__ModuleLoader__.load({
       registryNoIndex: 'no index yet',
       registryHasIndex: 'index exists',
       registryStore: 'store',
-      registryEditHint: 'Edit the lists in a session via cognition_registry (list / whitelist / unwhitelist / decline / allow).',
+      registryEditHint: 'Adding entries still happens in a session via cognition_registry (whitelist / decline); removing is available right here.',
+      registryRemove: 'Remove',
+      registryRemoving: 'Removing…',
+      registryRemoved: 'Removed',
+      registryRemoveFailed: 'Remove failed',
+      registryRemoveHint: 'Use the remove button on each row to drop the path from its list (blacklist = lift record, whitelist = remove); adding entries still happens in a session.',
       copied: 'Copied',
       coverageFiles: 'files',
       coverageLines: 'lines',
@@ -232,6 +242,20 @@ window.__ModuleLoader__.load({
       )))
     }
 
+    function RegistryRow({ row, timeKey, t, removing, onRemove }) {
+      const when = typeof row[timeKey] === 'string' ? row[timeKey].slice(0, 10) : '?'
+      return h('li', { key: row.path, className: 'pcp-entry', style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+        h('div', { style: { flex: '1 1 auto', minWidth: 0 } },
+          h('div', { style: { overflowWrap: 'anywhere' } }, row.path),
+          h('div', { className: 'pcp-note' },
+            `${when}${row.remark ? ' · ' + t('registryRemark') + ': ' + row.remark : ''} · ${row.hasIndex ? t('registryHasIndex') : t('registryNoIndex')}`)),
+        h('button', {
+          className: 'pcp-btn',
+          disabled: removing,
+          onClick: onRemove,
+        }, removing ? t('registryRemoving') : t('registryRemove')))
+    }
+
     function PanelPage({ api, workspaces, t, locale }) {
       const [project, setProject] = useState(workspaces[0]?.path ?? null)
       const [data, setData] = useState(null)
@@ -239,6 +263,7 @@ window.__ModuleLoader__.load({
       const [loading, setLoading] = useState(false)
       const [registry, setRegistry] = useState(null)
       const [registryError, setRegistryError] = useState(null)
+      const [removing, setRemoving] = useState(null) // { list, path } while a removal is in flight
       const [auto, setAuto] = useState(true)
       const projectRef = useRef(project)
       projectRef.current = project
@@ -270,6 +295,25 @@ window.__ModuleLoader__.load({
             setRegistry(null)
             setRegistryError(cause?.message ?? String(cause))
           }
+        }
+      }, [api])
+
+      const removeRow = useCallback(async (list, path) => {
+        if (typeof api.registryRemove !== 'function') {
+          setRemoving(null)
+          setRegistryError('面板移除功能需要重载 Host 后生效（registryRemove 远端方法缺失）')
+          return
+        }
+        setRemoving({ list, path })
+        try {
+          await api.registryRemove({ list, project: path })
+          // refresh the lists after a successful removal
+          setRegistry(await api.registryList({}))
+          setRegistryError(null)
+        } catch (cause) {
+          setRegistryError(cause?.message ?? String(cause))
+        } finally {
+          setRemoving(null)
         }
       }, [api])
 
@@ -341,19 +385,22 @@ window.__ModuleLoader__.load({
               h('div', { className: 'pcp-note', style: { fontWeight: 600 } }, `${t('blacklistTitle')} (${registry.declined.length})`),
               registry.declined.length === 0
                 ? h('div', { className: 'pcp-note' }, t('registryEmpty'))
-                : h('ul', { className: 'pcp-list' }, registry.declined.map(row => h('li', { key: row.path, className: 'pcp-entry' },
-                  h('div', null, row.path),
-                  h('div', { className: 'pcp-note' },
-                    `${row.declinedAt ? row.declinedAt.slice(0, 10) : '?'}${row.remark ? ' · ' + t('registryRemark') + ': ' + row.remark : ''} · ${row.hasIndex ? t('registryHasIndex') : t('registryNoIndex')}`))))),
+                : h('ul', { className: 'pcp-list' }, registry.declined.map(row => RegistryRow({
+                  row, timeKey: 'declinedAt', t,
+                  removing: removing !== null && removing.list === 'declined' && removing.path === row.path,
+                  onRemove: () => removeRow('declined', row.path),
+                })))),
             h('div', { style: { flex: '1 1 20rem' } },
               h('div', { className: 'pcp-note', style: { fontWeight: 600 } }, `${t('whitelistTitle')} (${registry.allowed.length})`),
               registry.allowed.length === 0
                 ? h('div', { className: 'pcp-note' }, t('registryEmpty'))
-                : h('ul', { className: 'pcp-list' }, registry.allowed.map(row => h('li', { key: row.path, className: 'pcp-entry' },
-                  h('div', null, row.path),
-                  h('div', { className: 'pcp-note' },
-                    `${row.allowedAt ? row.allowedAt.slice(0, 10) : '?'}${row.remark ? ' · ' + t('registryRemark') + ': ' + row.remark : ''} · ${row.hasIndex ? t('registryHasIndex') : t('registryNoIndex')}`)))))),
+                : h('ul', { className: 'pcp-list' }, registry.allowed.map(row => RegistryRow({
+                  row, timeKey: 'allowedAt', t,
+                  removing: removing !== null && removing.list === 'allowed' && removing.path === row.path,
+                  onRemove: () => removeRow('allowed', row.path),
+                }))))),
           h('p', { className: 'pcp-note' }, t('registryEditHint'))),
+          h('p', { className: 'pcp-note' }, t('registryRemoveHint')),
         h('div', { className: 'pcp-cards' },
           h(StatCard, { num: data.volumes?.code?.entries ?? 0, label: t('codeEntries') }),
           h(StatCard, { num: data.volumes?.database?.entries ?? 0, label: t('dbEntries') }),
@@ -571,6 +618,9 @@ window.__ModuleLoader__.load({
         'projectCognitionPanel/registryList': method('projectCognitionPanel',
           'Read-only registry snapshot: declined (blacklist) and allowed (whitelist) rows with timestamps, remarks, and index presence.',
           [{ name: 'request', description: 'unused.', source: 'json', codec: requestJson }]),
+        'projectCognitionPanel/registryRemove': method('projectCognitionPanel',
+          'Remove one project from a registry list from the panel: declined (lift blacklist) or allowed (remove from whitelist).',
+          [{ name: 'request', description: '{ list, project }.', source: 'json', codec: requestJson }]),
       },
     }
 
@@ -610,6 +660,7 @@ window.__ModuleLoader__.load({
         sessionGate: request => call('sessionGate', request),
         gateDecision: request => call('gateDecision', request),
         registryList: request => call('registryList', request),
+        registryRemove: request => call('registryRemove', request),
       }
 
       ctx.effect(() => ctx.slots.inject('main', () => ctx.slots.register({
