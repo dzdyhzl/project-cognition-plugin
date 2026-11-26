@@ -769,28 +769,21 @@ window.__ModuleLoader__.load({
           gateBusy = false
         }
       }
+      // accept and decline share one flow; only the recorded verdict differs.
+      const gateDecision = accept => async gate => {
+        gateStore.set({ ...gate, busy: true })
+        try {
+          await api.gateDecision({ project: gate.path, accept })
+          gateDismissed.add(gate.path)
+          gateStore.set(null)
+        } catch (error) {
+          gateStore.set({ ...gate, busy: false, error: error?.message ?? String(error) })
+        }
+      }
       const gateActions = {
         close: gate => { gateDismissed.add(gate.path); gateShownSessionId = undefined; gateStore.set(null) },
-        accept: async gate => {
-          gateStore.set({ ...gate, busy: true })
-          try {
-            await api.gateDecision({ project: gate.path, accept: true })
-            gateDismissed.add(gate.path)
-            gateStore.set(null)
-          } catch (error) {
-            gateStore.set({ ...gate, busy: false, error: error?.message ?? String(error) })
-          }
-        },
-        decline: async gate => {
-          gateStore.set({ ...gate, busy: true })
-          try {
-            await api.gateDecision({ project: gate.path, accept: false })
-            gateDismissed.add(gate.path)
-            gateStore.set(null)
-          } catch (error) {
-            gateStore.set({ ...gate, busy: false, error: error?.message ?? String(error) })
-          }
-        },
+        accept: gateDecision(true),
+        decline: gateDecision(false),
       }
       // The sessions list subscription is the activity sensor: the current
       // Canonical algorithm lives at shared/session-gate/index.js (tested); keep

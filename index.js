@@ -10,7 +10,7 @@
  * @module
  */
 
-import { readFile, mkdir, access } from 'node:fs/promises'
+import { readFile, mkdir, access, stat } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { join, basename, resolve, isAbsolute, sep, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -112,7 +112,6 @@ const rootWithDatabaseVolume = templates.rootWithDatabaseVolume
 const COGNITION_GITIGNORE = templates.COGNITION_GITIGNORE
 const upsertAgentsBlock = templates.upsertAgentsBlock
 const hasAgentsBlock = templates.hasAgentsBlock
-const agentsBlock = templates.agentsBlock
 
 /** Resolve the project root for a tool call: explicit arg, else the session working directory. */
 async function resolveProjectRoot(ctx, agent, requested) {
@@ -125,11 +124,13 @@ async function resolveProjectRoot(ctx, agent, requested) {
 
 async function statSafe(path) {
   try {
-    return (await import('node:fs/promises')).stat(path)
+    return await stat(path)
   } catch {
     return undefined
   }
 }
+
+
 
 async function fileExists(path) {
   try {
@@ -254,6 +255,58 @@ export function apply(ctx, userConfig = {}) {
   const extraExtensions = config.include
   const extraExcludeDirs = new Set(config.excludeDirs ?? [])
 
+/**
+ * Optimistic-lock write of one volume: assert state.json and the volume are
+ * unchanged since they were read, then atomically serialize and write.
+ */
+async function writeVolume(paths, stateRaw, volumeFile, volumeText, sections, isDatabase) {
+  await assertUnchanged(paths.state, stateRaw, 'state.json')
+  await assertUnchanged(volumeFile, volumeText, isDatabase ? 'the Database volume' : 'the Code volume')
+  await fmt.atomicWriteText(volumeFile, isDatabase ? fmt.serializeDatabaseVolume(sections) : fmt.serializeCodeVolume(sections))
+}
+
+
+/**
+ * Deterministic entry census across both volumes (code:/database: object ids),
+ * shared by cognition_snapshot and cognition_evolution.
+ */
+async function collectIndexEntries(paths) {
+  const entryList = []
+  for (const [volumeName, volumeFile] of [['code', paths.code], ['database', paths.database]]) {
+    if (!(await fileExists(volumeFile))) continue
+    const parsed = fmt.parseCodeVolume(await readFile(volumeFile, 'utf8'))
+    for (const section of parsed.sections) {
+      for (const entry of section.entries) {
+        const fullPath = fmt.entryPath(section, entry)
+        entryList.push({ object: `${volumeName}:${fullPath}`, tags: entry.tags, hash: fmt.entryHash({ path: fullPath, tags: entry.tags, f: entry.f, r: entry.r, a: entry.a, s: entry.s }) })
+      }
+    }
+  }
+  entryList.sort((a, b) => (a.object < b.object ? -1 : 1))
+  return entryList
+}
+
+/** Sum the estimated index tokens across root/meta/code/database volumes. */
+async function sumIndexTokens(paths) {
+  let tokens = 0
+  for (const volumeFile of [paths.root, paths.meta, paths.code, paths.database]) {
+    if (await fileExists(volumeFile)) tokens += estimateTokens(await readFile(volumeFile, 'utf8'))
+  }
+  return tokens
+}
+
+
+/** Inventory the managed tree with this plugin's effective options. */
+function walkInventory(root) {
+  return scanner.scanInventory(root, { maxFileBytes, excludeDirs: [...extraExcludeDirs], include: extraExtensions })
+}
+
+/** walkInventory + hashFiles: the common pairing for drift/coverage work. */
+async function walkHashed(root) {
+  const walked = await walkInventory(root)
+  await scanner.hashFiles(root, walked.files)
+  return walked
+}
   const renderText = (value) => [{ type: 'text', text: value.text ?? JSON.stringify(value) }]
 
   ctx.systemPrompt.section({
@@ -324,7 +377,7 @@ export function apply(ctx, userConfig = {}) {
         const flat = []
         for (const section of parsed.sections) {
           for (const entry of section.entries) {
-            const fullPath = `${section.dir === '.' ? '' : `${section.dir}/`}${entry.basename}`
+            const fullPath = fmt.entryPath(section, entry)
             flat.push(fmt.serializeEntry({ path: fullPath, tags: entry.tags, f: entry.f, r: entry.r, a: entry.a, s: entry.s }))
           }
         }
@@ -398,16 +451,17 @@ export function apply(ctx, userConfig = {}) {
           lines.push('Use cognition_search with volume="database" to query it, and cognition_database_scan for table drift.')
         }
       }
-      // Coverage facts (AOCI panel metric, simplified): how much managed code the index describes.
+      // One tree walk serves both coverage facts and the verify_drift drift
+      // report below; hashing the tree twice would only double the cost.
+      let walked = null
       if (state !== null) {
-        try {
-          const walked = await scanner.scanInventory(root, { maxFileBytes, excludeDirs: [...extraExcludeDirs], include: extraExtensions })
-          await scanner.hashFiles(root, walked.files)
+        try { walked = await walkHashed(root) } catch { /* best-effort */ }
+        if (walked !== null) {
           const coverage = scanner.coverageStats(walked.files, state)
           lines.push('')
           lines.push(`## Coverage: ${coverage.indexedFiles}/${coverage.totalFiles} files (${Math.round(coverage.coverageFiles * 100)}%), ${coverage.indexedLines}/${coverage.totalLines} lines (${Math.round(coverage.coverageLines * 100)}%)`)
           if (coverage.missingEntries > 0) lines.push(`Coverage excludes ${coverage.missingEntries} indexed files that no longer exist on disk (run cognition_scan for drift facts).`)
-        } catch { /* coverage is best-effort */ }
+        }
       }
       const pending = state?.pending ?? []
       if (pending.length > 0) {
@@ -424,14 +478,14 @@ export function apply(ctx, userConfig = {}) {
         lines.push(dbPending.slice(0, 100).join('\n'))
       }
       if (args.verify_drift && state !== null) {
-        const walked = await scanner.scanInventory(root, { maxFileBytes, excludeDirs: [...extraExcludeDirs], include: extraExtensions })
-        await scanner.hashFiles(root, walked.files)
-        const drift = scanner.compareDrift(walked.files, state)
-        lines.push('')
-        lines.push(`## Drift (verify_drift): missing=${drift.missing.length} orphan=${drift.orphan.length} stale=${drift.stale.length}`)
-        if (drift.stale.length > 0) lines.push(`stale (code changed after authoring): ${drift.stale.slice(0, 50).join(', ')}`)
-        if (drift.missing.length > 0) lines.push(`missing (deleted files still indexed): ${drift.missing.slice(0, 50).join(', ')}`)
-        if (drift.orphan.length > 0) lines.push(`orphan (new files not yet indexed): ${drift.orphan.slice(0, 50).join(', ')}`)
+        if (walked !== null) {
+          const drift = scanner.compareDrift(walked.files, state)
+          lines.push('')
+          lines.push(`## Drift (verify_drift): missing=${drift.missing.length} orphan=${drift.orphan.length} stale=${drift.stale.length}`)
+          if (drift.stale.length > 0) lines.push(`stale (code changed after authoring): ${drift.stale.slice(0, 50).join(', ')}`)
+          if (drift.missing.length > 0) lines.push(`missing (deleted files still indexed): ${drift.missing.slice(0, 50).join(', ')}`)
+          if (drift.orphan.length > 0) lines.push(`orphan (new files not yet indexed): ${drift.orphan.slice(0, 50).join(', ')}`)
+        }
       }
       return { text: lines.join('\n') }
     },
@@ -526,7 +580,7 @@ export function apply(ctx, userConfig = {}) {
         return { text: `No cognition state found under ${paths.dir}. Call cognition_init first.` }
       }
       const batchSize = Math.max(1, Math.min(200, args.batch_size ?? 25))
-      const walked = await scanner.scanInventory(root, { maxFileBytes, excludeDirs: [...extraExcludeDirs], include: extraExtensions })
+      const walked = await walkInventory(root)
       await scanner.hashFiles(root, walked.files)
       const inventory = walked.files
       const drift = scanner.compareDrift(inventory, state)
@@ -635,7 +689,7 @@ export function apply(ctx, userConfig = {}) {
       const codeRefExists = async (ref) => {
         if (projectFiles === null) {
           try {
-            const walked = await scanner.scanInventory(root, { maxFileBytes, excludeDirs: [...extraExcludeDirs], include: extraExtensions })
+            const walked = await walkInventory(root)
             projectFiles = walked.files
           } catch {
             projectFiles = new Map()
@@ -652,7 +706,7 @@ export function apply(ctx, userConfig = {}) {
       const entryExists = new Map()
       const accepted = []
       const rejected = []
-      for (const entry of args.entries ?? []) {
+      for (const entry of args.entries) {
         const posixPath = String(entry.path ?? '').replaceAll('\\', '/')
         if (posixPath.length === 0) {
           rejected.push({ path: '(empty)', errors: ['path is required'] })
@@ -704,9 +758,7 @@ export function apply(ctx, userConfig = {}) {
         accepted.push({ path: posixPath, tags: entry.tags, f: entry.f, r: entry.r, a: entry.a, s: entry.s })
       }
       fmt.upsertEntries(parsed.sections, new Map(accepted.map(entry => [entry.path, entry])))
-      await assertUnchanged(paths.state, stateRaw, 'state.json')
-      await assertUnchanged(volumeFile, volumeText, isDatabase ? 'the Database volume' : 'the Code volume')
-      await fmt.atomicWriteText(volumeFile, isDatabase ? fmt.serializeDatabaseVolume(parsed.sections) : fmt.serializeCodeVolume(parsed.sections))
+      await writeVolume(paths, stateRaw, volumeFile, volumeText, parsed.sections, isDatabase)
       // Record entry hashes and clear pending for accepted paths.
       const acceptedPaths = new Set(accepted.map(entry => entry.path))
       if (isDatabase) {
@@ -777,11 +829,9 @@ export function apply(ctx, userConfig = {}) {
       const volumeText = await readFile(volumeFile, 'utf8')
       const stateRaw = await readSnapshot(paths.state)
       const parsed = fmt.parseCodeVolume(volumeText)
-      const wanted = (args.paths ?? []).map(path => String(path).replaceAll('\\', '/')).filter(Boolean)
+      const wanted = args.paths.map(path => String(path).replaceAll('\\', '/')).filter(Boolean)
       const removed = fmt.removeEntries(parsed.sections, wanted)
-      await assertUnchanged(paths.state, stateRaw, 'state.json')
-      await assertUnchanged(volumeFile, volumeText, isDatabase ? 'the Database volume' : 'the Code volume')
-      await fmt.atomicWriteText(volumeFile, isDatabase ? fmt.serializeDatabaseVolume(parsed.sections) : fmt.serializeCodeVolume(parsed.sections))
+      await writeVolume(paths, stateRaw, volumeFile, volumeText, parsed.sections, isDatabase)
       if (isDatabase) {
         for (const path of removed) delete state.database.tables[path]
         removeDatabasePending(state, wanted)
@@ -848,7 +898,7 @@ export function apply(ctx, userConfig = {}) {
         const byPath = new Map()
         for (const section of parsed.sections) {
           for (const entry of section.entries) {
-            const fullPath = `${section.dir === '.' ? '' : `${section.dir}/`}${entry.basename}`
+            const fullPath = fmt.entryPath(section, entry)
             byPath.set(fullPath, entry)
           }
         }
@@ -954,7 +1004,7 @@ export function apply(ctx, userConfig = {}) {
       const results = []
       for (const section of parsed.sections) {
         for (const entry of section.entries) {
-          const fullPath = `${section.dir === '.' ? '' : `${section.dir}/`}${entry.basename}`
+          const fullPath = fmt.entryPath(section, entry)
           if (tagFilter.some(tag => !entry.tags.includes(tag))) continue
           if (pathMatch.length > 0 && !fullPath.toLowerCase().includes(pathMatch)) continue
           const haystack = `${entry.f} ${entry.r} ${entry.a} ${entry.s}`.toLowerCase()
@@ -1025,8 +1075,7 @@ export function apply(ctx, userConfig = {}) {
       for (const table of evidence.tables) {
         const identity = table.schema !== undefined ? `${table.schema}.${table.name}` : table.name
         touchedTables.push(identity)
-        if (state.database.tables[identity] === undefined) state.database.tables[identity] = { evidence: true }
-        else state.database.tables[identity].evidence = true
+        ;(state.database.tables[identity] ??= {}).evidence = true
       }
       // Upgrade root manifest + create the Database volume (idempotent).
       const rootText = await readFile(paths.root, 'utf8')
@@ -1103,7 +1152,7 @@ export function apply(ctx, userConfig = {}) {
       const indexed = []
       for (const section of parsed.sections) {
         for (const entry of section.entries) {
-          indexed.push(`${section.dir === '.' ? '' : `${section.dir}/`}${entry.basename}`)
+          indexed.push(fmt.entryPath(section, entry))
         }
       }
       const missingEntry = evidenceTables.filter(table => !indexed.includes(table))
@@ -1146,7 +1195,7 @@ export function apply(ctx, userConfig = {}) {
       // Inventory once; code: R references and code paths resolve against it.
       const filesCache = new Set()
       try {
-        const walked = await scanner.scanInventory(root, { maxFileBytes, excludeDirs: [...extraExcludeDirs], include: extraExtensions })
+        const walked = await walkInventory(root)
         for (const path of walked.files.keys()) filesCache.add(path)
       } catch {}
       const violations = []
@@ -1162,7 +1211,7 @@ export function apply(ctx, userConfig = {}) {
         for (const section of parsed.sections) {
           for (const entry of section.entries) {
             checked++
-            const fullPath = `${section.dir === '.' ? '' : `${section.dir}/`}${entry.basename}`
+            const fullPath = fmt.entryPath(section, entry)
             const errors = fmt.validateEntry({ path: fullPath, tags: entry.tags, f: entry.f, r: entry.r, a: entry.a, s: entry.s }, {
               dictionary,
               quota: rules.quota,
@@ -1208,30 +1257,15 @@ export function apply(ctx, userConfig = {}) {
       const paths = cognitionPaths(root)
       const stateData = await loadState(paths.state)
       if (stateData === null) return { text: `No cognition state under ${paths.dir}. Call cognition_init first.` }
-      const entryList = []
-      for (const [volumeName, volumeFile] of [['code', paths.code], ['database', paths.database]]) {
-        if (!(await fileExists(volumeFile))) continue
-        const parsed = fmt.parseCodeVolume(await readFile(volumeFile, 'utf8'))
-        for (const section of parsed.sections) {
-          for (const entry of section.entries) {
-            const fullPath = `${section.dir === '.' ? '' : `${section.dir}/`}${entry.basename}`
-            entryList.push({ object: volumeName === 'code' ? `code:${fullPath}` : `database:${fullPath}`, tags: entry.tags, hash: fmt.entryHash({ path: fullPath, tags: entry.tags, f: entry.f, r: entry.r, a: entry.a, s: entry.s }) })
-          }
-        }
-      }
-      entryList.sort((a, b) => (a.object < b.object ? -1 : 1))
+      const entryList = await collectIndexEntries(paths)
       // Deterministic coverage from the current tree.
       let coverage = null
       try {
-        const walked = await scanner.scanInventory(root, { maxFileBytes, excludeDirs: [...extraExcludeDirs], include: extraExtensions })
-        await scanner.hashFiles(root, walked.files)
+        const walked = await walkHashed(root)
         const stats = scanner.coverageStats(walked.files, stateData)
         coverage = { indexedFiles: stats.indexedFiles, totalFiles: stats.totalFiles, indexedLines: stats.indexedLines, totalLines: stats.totalLines, filesPct: Math.round(stats.coverageFiles * 100), linesPct: Math.round(stats.coverageLines * 100) }
       } catch { /* best-effort */ }
-      let indexTokens = 0
-      for (const volumeFile of [paths.root, paths.meta, paths.code, paths.database]) {
-        if (await fileExists(volumeFile)) indexTokens += estimateTokens(await readFile(volumeFile, 'utf8'))
-      }
+      const indexTokens = await sumIndexTokens(paths)
       const snapshot = {
         kind: 'project-cognition/snapshot',
         derived: true,
@@ -1279,18 +1313,7 @@ export function apply(ctx, userConfig = {}) {
         return { text: `cognition_evolution: ${snapshotAbs} is not a cognition_snapshot JSON (missing kind=project-cognition/snapshot).` }
       }
       // Current observation, built the same deterministic way.
-      const current = { entries: [] }
-      for (const [volumeName, volumeFile] of [['code', paths.code], ['database', paths.database]]) {
-        if (!(await fileExists(volumeFile))) continue
-        const parsed = fmt.parseCodeVolume(await readFile(volumeFile, 'utf8'))
-        for (const section of parsed.sections) {
-          for (const entry of section.entries) {
-            const fullPath = `${section.dir === '.' ? '' : `${section.dir}/`}${entry.basename}`
-            current.entries.push({ object: volumeName === 'code' ? `code:${fullPath}` : `database:${fullPath}`, tags: entry.tags, hash: fmt.entryHash({ path: fullPath, tags: entry.tags, f: entry.f, r: entry.r, a: entry.a, s: entry.s }) })
-          }
-        }
-      }
-      current.entries.sort((a, b) => (a.object < b.object ? -1 : 1))
+      const current = { entries: await collectIndexEntries(paths) }
       const previousMap = new Map(previous.entries.map(entry => [entry.object, entry]))
       const currentMap = new Map(current.entries.map(entry => [entry.object, entry]))
       const added = current.entries.filter(entry => !previousMap.has(entry.object))
@@ -1301,8 +1324,7 @@ export function apply(ctx, userConfig = {}) {
       const thenPending = (previous.counts?.pending ?? 0) + (previous.counts?.databasePending ?? 0)
       let currentCoverage = null
       try {
-        const walked = await scanner.scanInventory(root, { maxFileBytes, excludeDirs: [...extraExcludeDirs], include: extraExtensions })
-        await scanner.hashFiles(root, walked.files)
+        const walked = await walkHashed(root)
         const stats = scanner.coverageStats(walked.files, stateData ?? {})
         currentCoverage = { filesPct: Math.round(stats.coverageFiles * 100), linesPct: Math.round(stats.coverageLines * 100), totalLines: stats.totalLines }
       } catch { /* best-effort */ }
@@ -1316,11 +1338,7 @@ export function apply(ctx, userConfig = {}) {
         lines.push(`coverage: files ${previous.coverage.filesPct ?? '?'}% → ${currentCoverage.filesPct}%, lines ${previous.coverage.linesPct ?? '?'}% → ${currentCoverage.linesPct}% (total lines ${previous.coverage.totalLines ?? '?'} → ${currentCoverage.totalLines})`)
       }
       if (previous.indexTokens !== undefined) {
-        let currentIndexTokens = 0
-        for (const volumeFile of [paths.root, paths.meta, paths.code, paths.database]) {
-          if (await fileExists(volumeFile)) currentIndexTokens += estimateTokens(await readFile(volumeFile, 'utf8'))
-        }
-        lines.push(`index tokens: ${previous.indexTokens} → ${currentIndexTokens}`)
+        lines.push(`index tokens: ${previous.indexTokens} → ${await sumIndexTokens(paths)}`)
       }
       lines.push(`pending maintenance items: ${thenPending} → ${nowPending}`)
       if (added.length === 0 && removed.length === 0 && changed.length === 0) lines.push('The indexed object set is unchanged since the snapshot (entry contents may still differ inside F/R/A/S if hashes moved — see changed list above).')
@@ -1410,7 +1428,7 @@ export function apply(ctx, userConfig = {}) {
       // 6. Drift quick pass (only when state is readable)
       if (stateData !== null) {
         try {
-          const walked = await scanner.scanInventory(root, { maxFileBytes, excludeDirs: [...extraExcludeDirs], include: extraExtensions })
+          const walked = await walkInventory(root)
           await scanner.hashFiles(root, walked.files)
           const drift = scanner.compareDrift(walked.files, stateData)
           const drifted = drift.missing.length + drift.orphan.length + drift.stale.length

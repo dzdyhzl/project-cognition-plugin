@@ -143,18 +143,23 @@ export class ProjectCognitionPanelService extends PanelServiceBase {
     const databaseSummary = summarizeVolume(await readTextOrNull(paths.database))
     const header = fmt.parseRootManifest(rootText)
 
-    // Code drift and coverage: one walk, then compare against state.files.
+    // Code drift and coverage: one full tree walk, shared with the verify
+    // block below (it needs the same file set for R-reference checks).
+    let walked = null
+    let walkError = null
+    try {
+      walked = await scanner.scanInventory(root, {})
+      await scanner.hashFiles(root, walked.files)
+    } catch (error) {
+      walkError = error.message
+    }
     let drift = null
     let coverage = null
     if (state !== null) {
-      try {
-        const walked = await scanner.scanInventory(root, {})
-        await scanner.hashFiles(root, walked.files)
-        drift = scanner.compareDrift(walked.files, state)
-        coverage = scanner.coverageStats(walked.files, state)
-      } catch (error) {
-        drift = { error: error.message, missing: [], orphan: [], stale: [], unchanged: [] }
-      }
+      drift = walked === null
+        ? { error: walkError, missing: [], orphan: [], stale: [], unchanged: [] }
+        : scanner.compareDrift(walked.files, state)
+      coverage = walked === null ? null : scanner.coverageStats(walked.files, state)
     }
 
     // Database drift: evidence tables vs indexed table entries.
@@ -188,10 +193,7 @@ export class ProjectCognitionPanelService extends PanelServiceBase {
         : null
       const quota = fmt.parseSQuota(metaForRules)
       const fileSet = new Set()
-      try {
-        const walked = await scanner.scanInventory(root, {})
-        for (const path of walked.files.keys()) fileSet.add(path)
-      } catch {}
+      if (walked !== null) for (const path of walked.files.keys()) fileSet.add(path)
       const tableLookup = await (async () => {
         if (databaseSummary === null) return undefined
         let names = null
