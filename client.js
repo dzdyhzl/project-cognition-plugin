@@ -354,6 +354,8 @@ window.__ModuleLoader__.load({
       const [auto, setAuto] = useState(true)
       const projectRef = useRef(project)
       projectRef.current = project
+      const viewPathRef = useRef(null)
+      viewPathRef.current = viewPath
 
       const load = useCallback(async () => {
         const target = projectRef.current
@@ -397,7 +399,7 @@ window.__ModuleLoader__.load({
           // refresh the lists after a successful removal
           setRegistry(await api.registryList({}))
           // a removed row has no snapshot to show anymore
-          setViewPath(current => { if (current === path) { setViewData(null); setViewError(null); return null } return current })
+          setViewPath(current => { if (current === path) { viewSeqRef.current++; setViewData(null); setViewError(null); return null } return current })
           setRegistryError(null)
         } catch (cause) {
           setRegistryError(cause?.message ?? String(cause))
@@ -407,26 +409,35 @@ window.__ModuleLoader__.load({
       }, [api])
 
       // Expand (or collapse) the per-project snapshot view under the whitelist
-      // column; the snapshot is the same read-only panelData payload.
+      // column; the snapshot is the same read-only panelData payload. A request
+      // id (viewSeqRef) keeps an older in-flight fetch from rendering after a
+      // newer click, so the viewbox never shows another project's snapshot.
+      const viewSeqRef = useRef(0)
       const toggleView = useCallback(async (path) => {
-        if (viewPath === path) {
+        if (viewPathRef.current === path) {
+          viewSeqRef.current++
           setViewPath(null)
           setViewData(null)
           setViewError(null)
+          setViewLoading(false)
           return
         }
+        const seq = ++viewSeqRef.current
         setViewPath(path)
         setViewData(null)
         setViewError(null)
         setViewLoading(true)
         try {
-          setViewData(await api.panelData({ project: path }))
+          const snapshot = await api.panelData({ project: path })
+          if (seq !== viewSeqRef.current) return // a newer click superseded this fetch
+          setViewData(snapshot)
         } catch (cause) {
+          if (seq !== viewSeqRef.current) return
           setViewError(cause?.message ?? String(cause))
         } finally {
-          setViewLoading(false)
+          if (seq === viewSeqRef.current) setViewLoading(false)
         }
-      }, [api, viewPath])
+      }, [api])
 
       useEffect(() => { load() }, [load, project])
       useEffect(() => {
@@ -514,7 +525,7 @@ window.__ModuleLoader__.load({
             h('div', { className: 'pcp-section', style: { margin: '0 0 6px' } }, `${t('registryViewTitle')} · ${viewPath}`),
             viewError !== null && h('p', { className: 'pcp-error' }, t('failed', { message: viewError })),
             viewLoading && viewData === null && h('p', { className: 'pcp-note' }, h('span', { className: 'pcp-spinner' }), ' ', t('loading')),
-            viewData !== null && (viewData.indexExists === false
+            viewData !== null && viewData.root === viewPath && (viewData.indexExists === false
               ? h('p', { className: 'pcp-note' }, t('registryNoIndex'))
               : h(SnapshotView, { data: viewData, t, locale }))),
         h(SnapshotView, { data, t, locale }))
