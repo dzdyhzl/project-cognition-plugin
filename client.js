@@ -28,17 +28,8 @@ window.__ModuleLoader__.load({
       gateDeclineHint: '加入黑名单，不再询问',
       gateClose: '暂不选择（本次会话不再询问）',
       loading: '正在读取索引…',
-      retry: '重试',
       refresh: '刷新',
       auto: '30 秒自动刷新',
-      project: '项目',
-      noWorkspace: '没有已登记的工作区',
-      pickProject: '选择项目',
-      noIndexTitle: '这个项目还没有认知索引',
-      noIndexBody: '在项目里对 AI 说「为这个项目建立认知索引」，或调用 cognition_init 开始。',
-      declinedTitle: '这个项目已登记为「不建索引」',
-      declinedBody: '曾在此项目拒绝建立认知索引，后续会话不再主动建议。登记时间：{time}{remark}',
-      declinedLift: '解除登记：在会话中调用 cognition_registry，action="allow"。',
       codeEntries: '代码条目',
       dbEntries: '数据库条目',
       pendingCode: '待写代码条目',
@@ -70,8 +61,6 @@ window.__ModuleLoader__.load({
       registryEditHint: '名单新增仍请在会话中调用 cognition_registry（whitelist / decline）；此处可直接移出成员。',
       registryRemove: '移出',
       registryRemoving: '移除中…',
-      registryRemoved: '已移出名单',
-      registryRemoveFailed: '移除失败',
       registryRemoveHint: '点击条目右侧的移出按钮可直接将该路径移出名单（黑名单=解除登记，白名单=移出白名单）；新增仍需在会话中完成。',
       registryView: '查看',
       registryViewClose: '收起',
@@ -102,17 +91,8 @@ window.__ModuleLoader__.load({
       gateDeclineHint: 'Blacklist and never ask again',
       gateClose: 'Not now (no more prompts this session)',
       loading: 'Reading index…',
-      retry: 'Retry',
       refresh: 'Refresh',
       auto: 'Auto-refresh every 30s',
-      project: 'Project',
-      noWorkspace: 'No registered workspaces',
-      pickProject: 'Pick project',
-      noIndexTitle: 'No cognition index in this project yet',
-      noIndexBody: 'Tell the AI in a session to "build the cognition index for this project", or call cognition_init.',
-      declinedTitle: 'This project declined cognition-index creation',
-      declinedBody: 'Index creation was declined here, so future sessions will not suggest one. Declined at: {time}{remark}',
-      declinedLift: 'Lift the record: call cognition_registry with action="allow" in a session.',
       codeEntries: 'Code entries',
       dbEntries: 'Database entries',
       pendingCode: 'Pending code entries',
@@ -144,8 +124,6 @@ window.__ModuleLoader__.load({
       registryEditHint: 'Adding entries still happens in a session via cognition_registry (whitelist / decline); removing is available right here.',
       registryRemove: 'Remove',
       registryRemoving: 'Removing…',
-      registryRemoved: 'Removed',
-      registryRemoveFailed: 'Remove failed',
       registryRemoveHint: 'Use the remove button on each row to drop the path from its list (blacklist = lift record, whitelist = remove); adding entries still happens in a session.',
       registryView: 'View',
       registryViewClose: 'Collapse',
@@ -339,11 +317,7 @@ window.__ModuleLoader__.load({
     }
 
 
-    function PanelPage({ api, workspaces, t, locale }) {
-      const [project, setProject] = useState(workspaces[0]?.path ?? null)
-      const [data, setData] = useState(null)
-      const [error, setError] = useState(null)
-      const [loading, setLoading] = useState(false)
+    function PanelPage({ api, t, locale }) {
       const [registry, setRegistry] = useState(null)
       const [registryError, setRegistryError] = useState(null)
       const [removing, setRemoving] = useState(null) // { list, path } while a removal is in flight
@@ -352,27 +326,13 @@ window.__ModuleLoader__.load({
       const [viewLoading, setViewLoading] = useState(false)
       const [viewError, setViewError] = useState(null)
       const [auto, setAuto] = useState(true)
-      const projectRef = useRef(project)
-      projectRef.current = project
       const viewPathRef = useRef(null)
       viewPathRef.current = viewPath
 
       const load = useCallback(async () => {
-        const target = projectRef.current
-        if (target === null) return
-        setLoading(true)
-        try {
-          const snapshot = await api.panelData({ project: target })
-          setData(snapshot)
-          setError(null)
-        } catch (cause) {
-          setError(cause?.message ?? String(cause))
-        } finally {
-          setLoading(false)
-        }
-        // Registry lists are global (not per project); fetch once alongside.
-        // Feature-detect: a Host that has not reloaded the plugin since v1.18.x
-        // has no registryList remote method — show a reload hint instead of failing.
+        // Registry lists are global, not per project. Feature-detect: a Host that
+        // has not reloaded the plugin since v1.18.x has no registryList remote
+        // method — show a reload hint instead of failing.
         if (typeof api.registryList !== 'function') {
           setRegistry(null)
           setRegistryError('面板名单功能需要重载 Host 后生效（registryList 远端方法缺失）')
@@ -439,52 +399,17 @@ window.__ModuleLoader__.load({
         }
       }, [api])
 
-      useEffect(() => { load() }, [load, project])
+      useEffect(() => { load() }, [load])
       useEffect(() => {
         if (!auto) return undefined
         const timer = setInterval(() => { load() }, 30_000)
         return () => clearInterval(timer)
       }, [auto, load])
 
-      if (workspaces.length === 0) {
-        return h('div', { className: 'pcp-page' }, h(Style, null), h('div', { className: 'pcp-gate' }, h('p', null, t('noWorkspace'))))
-      }
-      if (data !== null && data.indexExists === false) {
-        const declined = data.declined === true
-        const remark = typeof data.declinedRemark === 'string' && data.declinedRemark !== '' ? ` · ${data.declinedRemark}` : ''
-        const when = typeof data.declinedAt === 'string' ? data.declinedAt.slice(0, 10) : '—'
-        return h('div', { className: 'pcp-page' }, h(Style, null),
-          h('div', { className: 'pcp-header' }, headerControls()),
-          h('div', { className: 'pcp-gate' },
-            h('p', { style: { fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } },
-              declined ? t('declinedTitle') : t('noIndexTitle')),
-            declined
-              ? h('p', null, t('declinedBody', { time: when, remark }))
-              : h('p', null, t('noIndexBody')),
-            declined && h('p', { className: 'pcp-note' }, t('declinedLift'))))
-      }
-      if (error !== null && data === null) {
-        return h('div', { className: 'pcp-page' }, h(Style, null),
-          h('div', { className: 'pcp-header' }, headerControls()),
-          h('p', { className: 'pcp-error' }, t('failed', { message: error })),
-          h('button', { className: 'pcp-btn', onClick: () => load() }, t('retry')))
-      }
-      if (data === null) {
-        return h('div', { className: 'pcp-page' }, h(Style, null),
-          h('div', { className: 'pcp-header' }, headerControls()),
-          h('p', { className: 'pcp-note' }, h('span', { className: 'pcp-spinner' }), ' ', t('loading')))
-      }
-
       function headerControls() {
         return [
           h('span', { className: 'pcp-title' }, t('panel')),
-          h('select', {
-            className: 'pcp-select',
-            value: project ?? '',
-            onChange: event => setProject(event.target.value),
-            'aria-label': t('pickProject'),
-          }, workspaces.map(workspace => h('option', { key: workspace.path, value: workspace.path }, workspace.title || workspace.path))),
-          h('button', { className: 'pcp-btn', onClick: () => load() }, loading ? `⟳ ${t('refresh')}` : t('refresh')),
+          h('button', { className: 'pcp-btn', onClick: () => load() }, t('refresh')),
           h('label', { className: 'pcp-check' },
             h('input', { type: 'checkbox', checked: auto, onChange: event => setAuto(event.target.checked) }),
             t('auto')),
@@ -527,8 +452,7 @@ window.__ModuleLoader__.load({
             viewLoading && viewData === null && h('p', { className: 'pcp-note' }, h('span', { className: 'pcp-spinner' }), ' ', t('loading')),
             viewData !== null && viewData.root === viewPath && (viewData.indexExists === false
               ? h('p', { className: 'pcp-note' }, t('registryNoIndex'))
-              : h(SnapshotView, { data: viewData, t, locale }))),
-        h(SnapshotView, { data, t, locale }))
+              : h(SnapshotView, { data: viewData, t, locale }))))
     }
 
 
@@ -736,21 +660,11 @@ window.__ModuleLoader__.load({
 
       ctx.effect(() => ctx.slots.inject('main', () => ctx.slots.register({
         name: 'main', key: PANEL_ID, locale: NS,
-        inject: () => {
-          const items = ctx.get('workspaces')?.list?.getSnapshot()?.items ?? []
-          const workspaces = []
-          for (const item of items) {
-            if (typeof item?.path !== 'string' || item.path.length === 0) continue
-            if (workspaces.some(existing => existing.path === item.path)) continue
-            workspaces.push({ path: item.path, title: typeof item.title === 'string' ? item.title : undefined })
-          }
-          return {
-            api,
-            workspaces,
-            t,
-            locale: ctx.locale.getSnapshot().active === 'zh' ? 'zh' : 'en',
-          }
-        },
+        inject: () => ({
+          api,
+          t,
+          locale: ctx.locale.getSnapshot().active === 'zh' ? 'zh' : 'en',
+        }),
       }, PanelPage)), 'project-cognition-panel: main page')
 
       // ------------------------------------------------ gate overlay
